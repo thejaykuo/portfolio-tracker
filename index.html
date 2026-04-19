@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>資產負債組合</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{overflow-y:scroll}
+body{background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#1c1c1e}
+input,select,button{font-family:inherit}
+input:focus,select:focus{outline:2px solid #F5B731;outline-offset:-1px}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:#ddd;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const C = {
+  bg:'#f5f5f5', card:'#fff', card2:'#f7f7f7', border:'#efefef',
+  txt:'#1c1c1e', muted:'#8e8e93', faint:'#b0b0b5',
+  yellow:'#F5B731', yellowLight:'#FEF3D0', yellowDark:'#C8901A',
+  green:'#34c759', red:'#ff3b30', blue:'#007AFF',
+  purple:'#af52de', orange:'#ff9500',
+  greenBg:'#e9faf0', redBg:'#fff0ee',
+  shadow:'0 2px 12px rgba(0,0,0,0.07)', shadowSm:'0 1px 4px rgba(0,0,0,0.05)',
+};
+const FUT_SPOT = { TX:'IX0001', MTX:'IX0001', TE:'IX0002', TF:'IX0004' };
+const SK = {
+  s:'ptf:s', f:'ptf:f', c:'ptf:c', l:'ptf:l', o:'ptf:o',
+  key:'ptf:key', r:'ptf:r', gh:'ptf:gh', gist:'ptf:gist',
+  rates:'ptf:rates', auto:'ptf:auto',
+};
+const DEF_RATES = { USD:32, HKD:4.1, EUR:35, JPY:0.22 };
+const GFILE = 'portfolio-data.json';
+const CCY_OPTS = [['TWD','🇹🇼 TWD'],['USD','🇺🇸 USD'],['HKD','🇭🇰 HKD'],['EUR','🇪🇺 EUR'],['JPY','🇯🇵 JPY']];
+const RANGES = [
+  {k:'1M',label:'1M',days:30},{k:'3M',label:'3M',days:90},
+  {k:'6M',label:'6M',days:180},{k:'1Y',label:'1Y',days:365},{k:'ALL',label:'全部',days:null},
+];
+const PAGE_SIZE = 15;
+
+const ls = {
+  get: k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}},
+  set: (k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}},
+};
+
+function fmt(n,d=0){if(n==null||isNaN(n))return'—';return n.toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function Pnl({v,d=0}){
+  if(v==null||isNaN(v))return<span style={{color:C.muted}}>—</span>;
+  return<span style={{color:v>=0?C.green:C.red,fontWeight:700}}>{v>=0?'+':''}{fmt(v,d)}</span>;
+}
+function calcNW(stocks,futures,cash,liabilities,otherAssets,rates){
+  const toT=(a,c)=>c==='TWD'?a:a*(rates[c]||1);
+  const sv=stocks.reduce((s,x)=>s+toT((x.px??x.cost)*x.qty,x.market==='US'?'USD':'TWD'),0);
+  const fm=futures.reduce((s,f)=>s+(f.margin||0),0);
+  const fp=futures.filter(f=>f.px!=null).reduce((s,f)=>s+(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult,0);
+  const cv=cash.reduce((s,c)=>s+toT(c.amount,c.ccy),0);
+  const ov=otherAssets.reduce((s,o)=>s+toT(o.amount,o.ccy),0);
+  const ta=sv+fm+fp+cv+ov;
+  const tl=liabilities.reduce((s,l)=>s+toT(l.amount,l.ccy),0);
+  return{ta,tl,nw:ta-tl};
+}
+
+// ── Primitives ────────────────────────────────
+function PageHeader({title,sub}){return(<div style={{padding:'28px 20px 8px'}}><div style={{fontSize:32,fontWeight:800,letterSpacing:-0.5}}>{title}</div>{sub&&<div style={{fontSize:14,color:C.muted,marginTop:2}}>{sub}</div>}</div>);}
+function Card({children,style={},onClick}){return(<div onClick={onClick} style={{background:C.card,borderRadius:18,padding:'16px 18px',marginBottom:12,boxShadow:C.shadow,cursor:onClick?'pointer':'default',...style}}>{children}</div>);}
+function Div(){return<div style={{height:1,background:C.border,margin:'0 -18px'}}/>;}
+function Pill({label,color=C.yellowLight,tc=C.yellowDark}){return<span style={{background:color,color:tc,borderRadius:20,fontSize:11,padding:'3px 10px',fontWeight:700}}>{label}</span>;}
+function Btn({children,onClick,color=C.yellow,tc='#1c1c1e',disabled=false,style={}}){return(<button onClick={disabled?undefined:onClick} disabled={disabled} style={{border:'none',borderRadius:14,padding:'12px 20px',cursor:disabled?'not-allowed':'pointer',background:disabled?C.border:color,color:disabled?C.muted:tc,fontSize:15,fontWeight:700,opacity:disabled?0.5:1,...style}}>{children}</button>);}
+function GBtn({children,onClick,color=C.yellow,disabled=false,style={}}){return(<button onClick={disabled?undefined:onClick} style={{border:`2px solid ${disabled?C.border:color}`,borderRadius:14,padding:'11px 18px',cursor:disabled?'not-allowed':'pointer',background:'transparent',color:disabled?C.muted:color,fontSize:14,fontWeight:700,opacity:disabled?0.5:1,...style}}>{children}</button>);}
+function Field({label,value,onChange,type='text',placeholder='',hint,suffix,pw=false}){return(<div style={{marginBottom:16}}><div style={{fontSize:12,color:C.muted,marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:0.5}}>{label}</div><div style={{position:'relative'}}><input type={pw?'password':type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{width:'100%',background:C.card2,border:`1.5px solid ${C.border}`,borderRadius:12,padding:'12px 14px',color:C.txt,fontSize:15,paddingRight:suffix?52:14}}/>{suffix&&<span style={{position:'absolute',right:14,top:'50%',transform:'translateY(-50%)',color:C.muted,fontSize:13,fontWeight:600}}>{suffix}</span>}</div>{hint&&<div style={{fontSize:12,color:C.faint,marginTop:5,lineHeight:1.4}}>{hint}</div>}</div>);}
+function Sel({label,value,onChange,opts}){return(<div style={{marginBottom:16}}><div style={{fontSize:12,color:C.muted,marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:0.5}}>{label}</div><select value={value} onChange={e=>onChange(e.target.value)} style={{width:'100%',background:C.card2,border:`1.5px solid ${C.border}`,borderRadius:12,padding:'12px 14px',color:C.txt,fontSize:15}}>{opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>);}
+function Modal({title,children,onClose}){return(<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:200}}><div style={{background:C.card,borderRadius:'24px 24px 0 0',padding:'0 20px 32px',width:'100%',maxWidth:520,maxHeight:'93vh',overflowY:'auto'}}><div style={{width:40,height:5,background:'#ddd',borderRadius:3,margin:'14px auto 0'}}/><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'18px 0 16px'}}><div style={{fontWeight:800,fontSize:20}}>{title}</div><button onClick={onClose} style={{background:C.card2,border:'none',borderRadius:'50%',width:32,height:32,cursor:'pointer',fontSize:17,color:C.muted,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700}}>×</button></div>{children}</div></div>);}
+function Chips({items,selected,onSelect,color=C.yellow}){return(<div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:18}}>{items.map(v=>(<button key={v} onClick={()=>onSelect(v)} style={{background:selected===v?color:C.card2,color:selected===v?'#1c1c1e':C.muted,border:`1.5px solid ${selected===v?color:C.border}`,borderRadius:20,padding:'6px 14px',fontSize:13,cursor:'pointer',fontWeight:selected===v?700:500}}>{v}</button>))}</div>);}
+function RowBtns({onEdit,onDel}){return(<div style={{display:'flex',gap:7}}><button onClick={onEdit} style={{background:C.card2,border:'none',borderRadius:10,padding:'5px 12px',fontSize:12,cursor:'pointer',color:C.blue,fontWeight:700}}>編輯</button><button onClick={onDel} style={{background:C.redBg,border:'none',borderRadius:10,padding:'5px 12px',fontSize:12,cursor:'pointer',color:C.red,fontWeight:700}}>刪除</button></div>);}
+function Toggle({on,onChange,label,sub}){return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}><div><div style={{fontSize:14,fontWeight:600,color:C.txt}}>{label}</div>{sub&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>{sub}</div>}</div><div onClick={()=>onChange(!on)} style={{width:50,height:28,borderRadius:14,background:on?C.yellow:C.border,cursor:'pointer',position:'relative',transition:'background .2s'}}><div style={{position:'absolute',top:3,left:on?24:3,width:22,height:22,borderRadius:'50%',background:'white',boxShadow:'0 1px 4px rgba(0,0,0,0.2)',transition:'left .2s'}}/></div></div>);}
+
+// ── Modals ────────────────────────────────────
+function StockModal({initial,onClose,onSave}){
+  const [mkt,setMkt]=useState(initial?.market||'TW');
+  const [sym,setSym]=useState(initial?.symbol||'');
+  const [name,setName]=useState(initial?.name||'');
+  const [qty,setQty]=useState(String(initial?.qty||''));
+  const [cost,setCost]=useState(String(initial?.cost||''));
+  const ok=sym.trim()&&+qty>0&&+cost>0;
+  const PRESETS=mkt==='TW'?[['2330','台積電'],['2317','鴻海'],['2454','聯發科'],['2308','台達電'],['0050','元大50'],['2881','富邦金']]:[['AAPL','Apple'],['NVDA','Nvidia'],['MSFT','Microsoft'],['GOOGL','Google'],['TSLA','Tesla']];
+  return(<Modal title={initial?'編輯股票':'新增股票'} onClose={onClose}><div style={{display:'flex',gap:10,marginBottom:18}}>{[['TW','🇹🇼 台股'],['US','🇺🇸 美股']].map(([v,l])=>(<button key={v} onClick={()=>{setMkt(v);setSym('');setName('');}} style={{flex:1,padding:'11px',borderRadius:14,border:`2px solid ${mkt===v?C.yellow:C.border}`,background:mkt===v?C.yellowLight:'white',color:mkt===v?C.yellowDark:C.muted,fontWeight:700,cursor:'pointer',fontSize:14}}>{l}</button>))}</div><div style={{display:'flex',flexWrap:'wrap',gap:7,marginBottom:18}}>{PRESETS.map(([s,n])=>(<button key={s} onClick={()=>{setSym(s);setName(n);}} style={{background:sym===s?C.yellow:C.card2,color:sym===s?'#1c1c1e':C.txt,border:'none',borderRadius:20,padding:'6px 13px',fontSize:13,cursor:'pointer',fontWeight:sym===s?700:400}}>{s} {n}</button>))}</div><Field label="股票代號" value={sym} onChange={v=>setSym(v.toUpperCase())} placeholder={mkt==='TW'?'e.g. 2330':'e.g. AAPL'}/><Field label="名稱（選填）" value={name} onChange={setName} placeholder={mkt==='TW'?'e.g. 台積電':'e.g. Apple'}/><Field label="持股數量" value={qty} onChange={setQty} type="number" placeholder="e.g. 1000" suffix="股"/><Field label="平均成本" value={cost} onChange={setCost} type="number" placeholder={mkt==='TW'?'e.g. 850':'e.g. 150'} suffix={mkt==='TW'?'TWD':'USD'}/><div style={{display:'flex',gap:10,marginTop:4}}><GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn><Btn onClick={()=>ok&&onSave({symbol:sym.trim(),name:name.trim()||sym.trim(),market:mkt,qty:+qty,cost:+cost})} disabled={!ok} style={{flex:2}}>確認</Btn></div></Modal>);
+}
+
+const FP_LIST=[{symbol:'TX',name:'台指期（大台）',mult:200},{symbol:'MTX',name:'小台指',mult:50},{symbol:'TE',name:'電子期',mult:4000},{symbol:'TF',name:'金融期',mult:1000}];
+function FutureModal({initial,onClose,onSave}){
+  const [sym,setSym]=useState(initial?.symbol||'TX');
+  const [name,setName]=useState(initial?.name||'台指期（大台）');
+  const [dir,setDir]=useState(initial?.dir||'long');
+  const [lots,setLots]=useState(String(initial?.lots||''));
+  const [entry,setEntry]=useState(String(initial?.entry||''));
+  const [mult,setMult]=useState(String(initial?.mult||200));
+  const [mgn,setMgn]=useState(String(initial?.margin||''));
+  const ok=sym.trim()&&+lots>0&&+entry>0;
+  return(<Modal title={initial?'編輯期貨':'新增期貨部位'} onClose={onClose}><div style={{display:'flex',flexWrap:'wrap',gap:7,marginBottom:8}}>{FP_LIST.map(p=>(<button key={p.symbol} onClick={()=>{setSym(p.symbol);setName(p.name);setMult(String(p.mult));}} style={{background:sym===p.symbol?C.yellow:C.card2,color:sym===p.symbol?'#1c1c1e':C.txt,border:'none',borderRadius:20,padding:'6px 13px',fontSize:13,cursor:'pointer',fontWeight:sym===p.symbol?700:400}}>{p.symbol} {p.name}</button>))}</div><div style={{fontSize:12,color:C.faint,marginBottom:16}}>個股期貨請輸入股票代號，乘數填 2000</div><Field label="商品代號" value={sym} onChange={setSym} placeholder="e.g. TX 或 2330"/><Field label="商品名稱" value={name} onChange={setName} placeholder="e.g. 台指期"/><div style={{display:'flex',gap:10,marginBottom:16}}>{[['long','🔼 做多'],['short','🔽 做空']].map(([v,l])=>(<button key={v} onClick={()=>setDir(v)} style={{flex:1,padding:'11px',borderRadius:14,fontWeight:700,cursor:'pointer',fontSize:14,border:`2px solid ${dir===v?(v==='long'?C.green:C.red):C.border}`,background:dir===v?(v==='long'?C.greenBg:C.redBg):'white',color:dir===v?(v==='long'?C.green:C.red):C.muted}}>{l}</button>))}</div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><Field label="口數" value={lots} onChange={setLots} type="number" placeholder="e.g. 2" suffix="口"/><Field label="進場均價" value={entry} onChange={setEntry} type="number" placeholder="e.g. 22000"/></div><Field label="每點乘數" value={mult} onChange={setMult} type="number" suffix="TWD/點" hint="大台=200 / 小台=50 / 個股期=2000"/><Field label="保證金（選填）" value={mgn} onChange={setMgn} type="number" placeholder="e.g. 167000" suffix="TWD"/><div style={{display:'flex',gap:10,marginTop:4}}><GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn><Btn onClick={()=>ok&&onSave({symbol:sym.trim(),name:name.trim()||sym.trim(),dir,lots:+lots,entry:+entry,mult:+mult,margin:mgn?+mgn:0})} disabled={!ok} color={C.orange} tc="white" style={{flex:2}}>確認</Btn></div></Modal>);
+}
+function CashModal({initial,onClose,onSave}){
+  const [label,setLabel]=useState(initial?.label||'');const [amount,setAmount]=useState(String(initial?.amount||''));const [ccy,setCcy]=useState(initial?.ccy||'TWD');const ok=label.trim()&&+amount>0;
+  return(<Modal title={initial?'編輯現金':'新增現金'} onClose={onClose}><Chips items={['台幣現金','美元現金','歐元現金','日圓現金','活存/定存','備用金']} selected={label} onSelect={v=>{setLabel(v);setCcy(v==='美元現金'?'USD':v==='歐元現金'?'EUR':v==='日圓現金'?'JPY':'TWD');}}/><Field label="名稱" value={label} onChange={setLabel} placeholder="e.g. 台幣現金"/><Sel label="幣別" value={ccy} onChange={setCcy} opts={CCY_OPTS}/><Field label="金額" value={amount} onChange={setAmount} type="number" placeholder="e.g. 500000" suffix={ccy}/><div style={{display:'flex',gap:10,marginTop:4}}><GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn><Btn onClick={()=>ok&&onSave({label:label.trim(),amount:+amount,ccy})} disabled={!ok} color={C.green} tc="white" style={{flex:2}}>確認</Btn></div></Modal>);
+}
+function LiabModal({initial,onClose,onSave}){
+  const [label,setLabel]=useState(initial?.label||'');const [amount,setAmount]=useState(String(initial?.amount||''));const [ccy,setCcy]=useState(initial?.ccy||'TWD');const [rate,setRate]=useState(String(initial?.rate||''));const ok=label.trim()&&+amount>0;
+  return(<Modal title={initial?'編輯負債':'新增負債'} onClose={onClose}><Chips items={['房貸','車貸','信貸','信用卡','股票質押']} selected={label} onSelect={setLabel} color={C.red}/><Field label="名稱" value={label} onChange={setLabel} placeholder="e.g. 房貸"/><Sel label="幣別" value={ccy} onChange={setCcy} opts={CCY_OPTS}/><Field label="未償餘額" value={amount} onChange={setAmount} type="number" placeholder="e.g. 5000000" suffix={ccy}/><Field label="年利率（選填）" value={rate} onChange={setRate} type="number" placeholder="e.g. 2.6" suffix="%" hint="僅供顯示"/><div style={{display:'flex',gap:10,marginTop:4}}><GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn><Btn onClick={()=>ok&&onSave({label:label.trim(),amount:+amount,ccy,rate:rate?+rate:null})} disabled={!ok} color={C.red} tc="white" style={{flex:2}}>確認</Btn></div></Modal>);
+}
+function OtherModal({initial,onClose,onSave}){
+  const [label,setLabel]=useState(initial?.label||'');const [amount,setAmount]=useState(String(initial?.amount||''));const [ccy,setCcy]=useState(initial?.ccy||'TWD');const [note,setNote]=useState(initial?.note||'');const ok=label.trim()&&+amount>0;
+  return(<Modal title={initial?'編輯其他資產':'新增其他資產'} onClose={onClose}><Chips items={['不動產','汽車','黃金','退休金','保險現金值']} selected={label} onSelect={setLabel} color={C.purple}/><Field label="資產名稱" value={label} onChange={setLabel} placeholder="e.g. 台北市不動產"/><Sel label="幣別" value={ccy} onChange={setCcy} opts={CCY_OPTS}/><Field label="估計現值" value={amount} onChange={setAmount} type="number" placeholder="e.g. 15000000" suffix={ccy}/><Field label="備註（選填）" value={note} onChange={setNote} placeholder="e.g. 大安區，2房"/><div style={{display:'flex',gap:10,marginTop:4}}><GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn><Btn onClick={()=>ok&&onSave({label:label.trim(),amount:+amount,ccy,note:note.trim()})} disabled={!ok} color={C.purple} tc="white" style={{flex:2}}>確認</Btn></div></Modal>);
+}
+function SettingsModal({fugleKey,setFugleKey,ghToken,setGhToken,gistId,setGistId,autoSave,setAutoSave,onClose}){
+  const [fk,setFk]=useState(fugleKey||'');
+  const [gt,setGt]=useState(ghToken||'');
+  const [gi,setGi]=useState(gistId||'');
+  const [asEn,setAsEn]=useState(autoSave.enabled);
+  const [asTime,setAsTime]=useState(autoSave.time||'08:00');
+  const save=()=>{
+    ls.set(SK.key,fk.trim());setFugleKey(fk.trim());
+    ls.set(SK.gh,gt.trim());setGhToken(gt.trim());
+    ls.set(SK.gist,gi.trim());setGistId(gi.trim());
+    const as={enabled:asEn,time:asTime};ls.set(SK.auto,as);setAutoSave(as);
+    onClose();
+  };
+  return(
+    <Modal title="設定" onClose={onClose}>
+      <div style={{fontSize:13,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:0.5,marginBottom:12}}>📈 報價來源</div>
+      <Field label="Fugle API Key" value={fk} onChange={setFk} pw placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" hint="台股與指數報價。申請：developer.fugle.tw"/>
+
+      <div style={{fontSize:13,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:0.5,marginBottom:12,marginTop:4}}>⏰ 自動更新 & 儲存</div>
+      <Card style={{marginBottom:14,boxShadow:'none',border:`1.5px solid ${C.border}`,padding:'14px 16px'}}>
+        <Toggle on={asEn} onChange={setAsEn} label="每日自動更新報價並儲存快照" sub="App 開啟時於指定時間自動執行"/>
+        {asEn&&(
+          <div style={{marginTop:12}}>
+            <div style={{fontSize:12,color:C.muted,marginBottom:6,fontWeight:700,textTransform:'uppercase',letterSpacing:0.5}}>每日執行時間</div>
+            <input type="time" value={asTime} onChange={e=>setAsTime(e.target.value)}
+              style={{width:'100%',background:C.card2,border:`1.5px solid ${C.border}`,borderRadius:12,padding:'12px 14px',color:C.txt,fontSize:16,fontWeight:700}}/>
+            <div style={{fontSize:12,color:C.faint,marginTop:6,lineHeight:1.5}}>
+              需保持 App 開啟於此頁面。同日若已有快照則覆蓋。若有設定 Gist 則同步自動上傳。
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <div style={{fontSize:13,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:0.5,marginBottom:12}}>☁️ Gist 雲端同步</div>
+      <div style={{background:C.yellowLight,border:`1px solid #f0d888`,borderRadius:12,padding:12,marginBottom:14,fontSize:13,color:C.yellowDark,lineHeight:1.6}}>
+        github.com → Settings → Developer settings → Personal access tokens → 勾選 <b>gist</b> 權限
+      </div>
+      <Field label="GitHub Personal Access Token" value={gt} onChange={setGt} pw placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" hint="僅需 gist 權限，儲存於本機"/>
+      <Field label="Gist ID（留空則自動建立）" value={gi} onChange={setGi} placeholder="首次上傳後自動填入"/>
+      <div style={{background:'#fff9e6',borderRadius:12,padding:10,marginBottom:16,fontSize:12,color:'#7d6608'}}>⚠️ 所有金鑰僅存於本機 localStorage</div>
+      <div style={{display:'flex',gap:10}}>
+        <GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn>
+        <Btn onClick={save} style={{flex:2}}>儲存設定</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Net Worth Card ────────────────────────────
+function EyeOpen(){return<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;}
+function EyeClosed(){return<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;}
+function NetWorthCard({stocks,futures,cash,liabilities,otherAssets,rates,hidden,toggleHidden}){
+  const{ta,tl,nw}=calcNW(stocks,futures,cash,liabilities,otherAssets,rates);
+  const dot='••••••';
+  return(
+    <div style={{background:'linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)',borderRadius:24,padding:'24px 22px',marginBottom:12,boxShadow:'0 8px 32px rgba(0,0,0,0.18)'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,color:'rgba(255,255,255,0.5)',marginBottom:6,fontWeight:600,letterSpacing:0.5}}>NET WORTH 淨值</div>
+          <div style={{fontSize:36,fontWeight:800,letterSpacing:-1,minHeight:44,color:hidden?'rgba(255,255,255,0.5)':(nw>=0?C.yellow:'#f87171')}}>
+            {hidden?dot:('NT$ '+fmt(nw))}
+          </div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,0.35)',marginTop:5}}>
+            USD {(rates.USD||32).toFixed(2)} · EUR {(rates.EUR||35).toFixed(2)} · JPY {(rates.JPY||0.22).toFixed(3)}
+          </div>
+        </div>
+        <button onClick={toggleHidden} style={{background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.18)',borderRadius:12,width:38,height:38,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginLeft:12}}>
+          {hidden?<EyeClosed/>:<EyeOpen/>}
+        </button>
+      </div>
+      <div style={{height:1,background:'rgba(255,255,255,0.1)',margin:'16px 0'}}/>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div><div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginBottom:4}}>▲ 總資產</div><div style={{fontSize:18,fontWeight:700,color:hidden?'rgba(255,255,255,0.2)':'#4ade80'}}>{hidden?dot:('NT$ '+fmt(ta))}</div></div>
+        <div><div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginBottom:4}}>▼ 總負債</div><div style={{fontSize:18,fontWeight:700,color:hidden?'rgba(255,255,255,0.2)':(tl>0?'#f87171':'rgba(255,255,255,0.3)')}}>{hidden?dot:('NT$ '+fmt(tl))}</div></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Overview ──────────────────────────────────
+function Tile({icon,label,value,sub,color=C.yellow,onClick}){return(<div onClick={onClick} style={{background:C.card,borderRadius:20,padding:16,boxShadow:C.shadowSm,cursor:onClick?'pointer':'default',border:`1.5px solid ${C.border}`}} onMouseDown={e=>onClick&&(e.currentTarget.style.transform='scale(0.96)')} onMouseUp={e=>onClick&&(e.currentTarget.style.transform='scale(1)')} onMouseLeave={e=>onClick&&(e.currentTarget.style.transform='scale(1)')}><div style={{width:40,height:40,borderRadius:12,background:color+'20',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,marginBottom:10}}>{icon}</div><div style={{fontSize:12,color:C.muted,fontWeight:600,marginBottom:4}}>{label}</div><div style={{fontSize:16,fontWeight:800,lineHeight:1.2}}>{value}</div>{sub&&<div style={{fontSize:11,color:C.muted,marginTop:4}}>{sub}</div>}{onClick&&<div style={{fontSize:11,color,marginTop:6,fontWeight:600}}>查看明細 ›</div>}</div>);}
+function Overview({stocks,twS,usS,futs,cash,liabilities,otherAssets,rates,setTab,hidden,toggleHidden}){
+  const twVal=twS.reduce((s,x)=>s+(x.px??x.cost)*x.qty,0);const twPnl=twS.filter(x=>x.px!=null).reduce((s,x)=>s+(x.px-x.cost)*x.qty,0);
+  const usVal=usS.reduce((s,x)=>s+(x.px??x.cost)*x.qty,0);const fPnl=futs.filter(f=>f.px!=null).reduce((s,f)=>s+(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult,0);
+  const fMgn=futs.reduce((s,f)=>s+(f.margin||0),0);const twCsh=cash.filter(c=>c.ccy==='TWD').reduce((s,c)=>s+c.amount,0);const usCsh=cash.filter(c=>c.ccy==='USD').reduce((s,c)=>s+c.amount,0);
+  const otTWD=otherAssets.filter(o=>o.ccy==='TWD').reduce((s,o)=>s+o.amount,0);
+  const allEmpty=stocks.length===0&&futs.length===0&&cash.length===0&&liabilities.length===0&&otherAssets.length===0;
+  return(<div><PageHeader title="總覽" sub="資產負債組合"/><div style={{padding:'0 16px'}}><NetWorthCard stocks={stocks} futures={futs} cash={cash} liabilities={liabilities} otherAssets={otherAssets} rates={rates} hidden={hidden} toggleHidden={toggleHidden}/>{allEmpty?(<div style={{textAlign:'center',color:C.muted,paddingTop:40}}><div style={{fontSize:52,marginBottom:16}}>📋</div><div style={{fontSize:17,fontWeight:700,color:C.txt,marginBottom:6}}>尚未新增任何資產</div><div style={{fontSize:14}}>請前往下方各分頁新增</div></div>):(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>{twS.length>0&&<Tile icon="🇹🇼" label="台股市值" value={'NT$'+fmt(twVal)} sub={twS.some(x=>x.px)?'損益 '+(twPnl>=0?'+':'')+fmt(twPnl):'需更新報價'} color={C.blue} onClick={()=>setTab('stocks')}/>}{usS.length>0&&<Tile icon="🇺🇸" label="美股市值" value={'$'+fmt(usVal,2)} sub={usS.some(x=>x.px)?'≈NT$'+fmt(usVal*(rates.USD||32)):'需更新報價'} color={C.purple} onClick={()=>setTab('stocks')}/>}{futs.length>0&&<Tile icon="📈" label="期貨損益" value={futs.some(f=>f.px)?(fPnl>=0?'+':'')+fmt(fPnl):'待更新'} sub={'保證金 NT$'+fmt(fMgn)} color={C.orange} onClick={()=>setTab('futures')}/>}{cash.length>0&&<Tile icon="💵" label="現金存款" value={'NT$'+fmt(twCsh)} sub={usCsh>0?'+ USD '+fmt(usCsh,2):undefined} color={C.green} onClick={()=>setTab('cash')}/>}{otherAssets.length>0&&<Tile icon="🏠" label="其他資產" value={'NT$'+fmt(otTWD)} sub={otherAssets.length+' 項'} color={C.purple} onClick={()=>setTab('other')}/>}{liabilities.length>0&&<Tile icon="💳" label="總負債" value={'NT$'+fmt(liabilities.filter(l=>l.ccy==='TWD').reduce((s,l)=>s+l.amount,0))} sub={liabilities.length+' 筆'} color={C.red} onClick={()=>setTab('liab')}/>}</div>)}</div></div>);
+}
+function Strip({items}){return(<div style={{background:C.yellowLight,border:`1px solid #f0d888`,borderRadius:16,padding:'14px 18px',marginBottom:14,display:'flex',gap:16,flexWrap:'wrap'}}>{items.map(([l,v,col],i)=>(<div key={i} style={{flex:'1 1 auto',minWidth:70}}><div style={{fontSize:11,color:C.yellowDark,marginBottom:3,fontWeight:600}}>{l}</div><div style={{fontSize:15,fontWeight:800,color:col||C.yellowDark}}>{v}</div></div>))}</div>);}
+
+// ── Stocks / Futures / List Tabs (unchanged) ──
+function StocksTab({stocks,setStocks,onEdit}){
+  const del=id=>setStocks(p=>p.filter(s=>s.id!==id));
+  const twS=stocks.filter(s=>s.market==='TW');const usS=stocks.filter(s=>s.market==='US');
+  const twV=twS.reduce((s,x)=>s+(x.px??x.cost)*x.qty,0);const twP=twS.filter(x=>x.px!=null).reduce((s,x)=>s+(x.px-x.cost)*x.qty,0);
+  const usV=usS.reduce((s,x)=>s+(x.px??x.cost)*x.qty,0);const usP=usS.filter(x=>x.px!=null).reduce((s,x)=>s+(x.px-x.cost)*x.qty,0);
+  function Section({title,list,cur}){if(!list.length)return null;const d=cur==='USD'?2:1;return(<Card><div style={{fontSize:12,color:C.muted,fontWeight:700,marginBottom:6,textTransform:'uppercase',letterSpacing:0.5}}>{title}</div>{list.map((s,i)=>{const pnl=s.px!=null?(s.px-s.cost)*s.qty:null;const pct=s.px!=null?(s.px-s.cost)/s.cost*100:null;return(<div key={s.id}>{i>0&&<Div/>}<div style={{padding:'13px 0'}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}><div><span style={{fontWeight:800,fontSize:16}}>{s.symbol}</span>{s.name&&s.name!==s.symbol&&<span style={{color:C.muted,fontSize:12,marginLeft:8}}>{s.name}</span>}</div><div style={{textAlign:'right'}}><div style={{fontWeight:800,fontSize:15}}>{s.px!=null?fmt(s.px,d):<span style={{color:C.muted,fontSize:12}}>未取得報價</span>}</div><div style={{fontSize:12,marginTop:2}}>{pnl!=null?<><Pnl v={pnl} d={d}/> <span style={{color:C.faint}}>({pct>=0?'+':''}{pct?.toFixed(1)}%)</span></>:'—'}</div></div></div><div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:12,color:C.muted}}>{fmt(s.qty)}股 · 均{fmt(s.cost,d)} · {cur==='TWD'?'NT$':'$'}{fmt((s.px??s.cost)*s.qty,d)}</span><RowBtns onEdit={()=>onEdit(s)} onDel={()=>del(s.id)}/></div></div></div>);})}</Card>);}
+  return(<div><PageHeader title="股票" sub="台股 · 美股"/><div style={{padding:'0 16px'}}>{stocks.length>0&&<Strip items={[...(twS.length?[['🇹🇼 台股','NT$'+fmt(twV)],['台股損益',(twP>=0?'+':'')+fmt(twP),twP>=0?C.green:C.red]]:[]),...(usS.length?[['🇺🇸 美股','$'+fmt(usV,2)],['美股損益',(usP>=0?'+':'')+fmt(usP,2),usP>=0?C.green:C.red]]:[])]}/>}{stocks.length===0&&<div style={{textAlign:'center',color:C.muted,paddingTop:60}}><div style={{fontSize:48,marginBottom:14}}>📭</div><div style={{fontSize:15,fontWeight:600}}>尚無持股</div></div>}<Section title="🇹🇼 台股 TWD" list={twS} cur="TWD"/><Section title="🇺🇸 美股 USD" list={usS} cur="USD"/></div></div>);
+}
+function FuturesTab({futures,setFutures,onEdit}){
+  const del=id=>setFutures(p=>p.filter(f=>f.id!==id));
+  const tPnl=futures.filter(f=>f.px!=null).reduce((s,f)=>s+(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult,0);
+  const tMgn=futures.reduce((s,f)=>s+(f.margin||0),0);const hasPx=futures.some(f=>f.px!=null);
+  return(<div><PageHeader title="期貨" sub="指數期貨 · 個股期貨"/><div style={{padding:'0 16px'}}>{futures.length>0&&<Strip items={[['未實現損益',hasPx?(tPnl>=0?'+':'')+fmt(tPnl)+' TWD':'需更新',hasPx?(tPnl>=0?C.green:C.red):C.muted],['保證金','NT$'+fmt(tMgn)],['部位數',futures.length+' 個']]}/>}{futures.length===0&&<div style={{textAlign:'center',color:C.muted,paddingTop:60}}><div style={{fontSize:48,marginBottom:14}}>📭</div><div style={{fontSize:15,fontWeight:600}}>尚無期貨部位</div></div>}{futures.map(f=>{const pnl=f.px!=null?(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult:null;const pts=f.px!=null?(f.dir==='long'?1:-1)*(f.px-f.entry):null;return(<Card key={f.id}><div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}><div><div style={{display:'flex',alignItems:'center',gap:9,marginBottom:5}}><span style={{fontWeight:800,fontSize:18}}>{f.symbol}</span><span style={{background:f.dir==='long'?C.greenBg:C.redBg,color:f.dir==='long'?C.green:C.red,borderRadius:20,fontSize:12,padding:'3px 10px',fontWeight:700}}>{f.dir==='long'?'做多 ▲':'做空 ▼'}</span></div><div style={{fontSize:12,color:C.muted}}>{f.name} · 參考 {FUT_SPOT[f.symbol]||f.symbol}</div></div><div style={{textAlign:'right'}}>{f.px!=null?<><div style={{fontWeight:800,fontSize:17}}>{fmt(f.px)}</div><div style={{fontSize:11,color:C.muted}}>現價</div></>:<div style={{color:C.muted,fontSize:13}}>待更新</div>}</div></div><div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:14}}>{[['進場均價',fmt(f.entry)],['口數',f.lots+' 口'],['乘數',fmt(f.mult)],['保證金',f.margin?'NT$'+fmt(f.margin):'—']].map(([l,v])=>(<div key={l} style={{background:C.card2,borderRadius:12,padding:'9px 10px'}}><div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:600}}>{l}</div><div style={{fontSize:13,fontWeight:700}}>{v}</div></div>))}</div><Div/><div style={{paddingTop:13,display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><div style={{fontSize:11,color:C.muted,marginBottom:3,fontWeight:600}}>未實現損益 TWD</div><div style={{fontSize:20,fontWeight:800}}>{pnl!=null?<Pnl v={pnl}/>:<span style={{color:C.muted,fontSize:14}}>需更新報價</span>}</div>{pts!=null&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{pts>=0?'+':''}{fmt(pts)} 點</div>}</div><RowBtns onEdit={()=>onEdit(f)} onDel={()=>del(f.id)}/></div></Card>);})}</div></div>);
+}
+function ListTab({items,setItems,onEdit,title,sub,emptyIcon,emptyText,renderAmt,renderSub,strip}){
+  const del=id=>setItems(p=>p.filter(x=>x.id!==id));
+  return(<div><PageHeader title={title} sub={sub}/><div style={{padding:'0 16px'}}>{items.length>0&&strip&&<Strip items={strip}/>}{items.length===0&&<div style={{textAlign:'center',color:C.muted,paddingTop:60}}><div style={{fontSize:48,marginBottom:14}}>{emptyIcon}</div><div style={{fontSize:15,fontWeight:600}}>{emptyText}</div></div>}{items.length>0&&<Card>{items.map((item,i)=>(<div key={item.id}>{i>0&&<Div/>}<div style={{padding:'13px 0',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:15}}>{item.label}</div>{renderSub&&<div style={{fontSize:12,color:C.muted,marginTop:3}}>{renderSub(item)}</div>}</div><div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}><div style={{fontWeight:800,fontSize:15}}>{renderAmt(item)}</div><RowBtns onEdit={()=>onEdit(item)} onDel={()=>del(item.id)}/></div></div></div>))}</Card>}</div></div>);
+}
+
+// ── Chart ─────────────────────────────────────
+function NWChart({entries}){
+  if(entries.length<2)return<div style={{textAlign:'center',color:C.muted,padding:'16px 0',fontSize:13}}>需至少 2 筆記錄才能顯示走勢</div>;
+  const W=340,H=150,PL=8,PR=8,PT=14,PB=28;const cW=W-PL-PR,cH=H-PT-PB;
+  const vals=entries.map(([,v])=>v.nw);
+  const mn=Math.min(...vals),mx=Math.max(...vals),rng=mx-mn||1;
+  const toX=i=>PL+(i/(entries.length-1))*cW;
+  const toY=v=>PT+cH-((v-mn)/rng)*cH;
+  const pts=entries.map(([,v],i)=>({x:toX(i),y:toY(v.nw)}));
+  const poly=pts.map(p=>p.x+','+p.y).join(' ');
+  const area=PL+','+(PT+cH)+' '+poly+' '+toX(entries.length-1)+','+(PT+cH);
+  const col=vals[vals.length-1]>=vals[0]?C.yellow:C.red;
+  const n=entries.length;
+  const lblIdxs=n<=6?entries.map((_,i)=>i):[0,Math.floor(n/4),Math.floor(n/2),Math.floor(3*n/4),n-1];
+  return(
+    <svg viewBox={'0 0 '+W+' '+H} style={{width:'100%',display:'block'}}>
+      <defs><linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity="0.3"/><stop offset="100%" stopColor={col} stopOpacity="0"/></linearGradient></defs>
+      <polygon points={area} fill="url(#gr)"/>
+      <polyline points={poly} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+      <circle cx={pts[0].x} cy={pts[0].y} r="4" fill={col}/>
+      <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="5" fill={col}/>
+      {lblIdxs.map(i=>(<text key={i} x={toX(i)} y={H-6} textAnchor="middle" style={{fontSize:9,fill:C.muted}}>{entries[i][0].slice(5)}</text>))}
+      <text x={PL} y={PT+cH-2} textAnchor="start" style={{fontSize:9,fill:C.faint}}>{(mn/1e6).toFixed(1)}M</text>
+      <text x={PL} y={PT+10}   textAnchor="start" style={{fontSize:9,fill:C.faint}}>{(mx/1e6).toFixed(1)}M</text>
+    </svg>
+  );
+}
+
+// ── Records Tab ───────────────────────────────
+function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,ghToken,gistId,stocks,futures,autoSave,lastAutoSaveMsg}){
+  const [range,setRange] = useState('ALL');
+  const [page,setPage]   = useState(0);
+  const today = new Date().toISOString().slice(0,10);
+  const hasPx = stocks.some(s=>s.px!=null)||futures.some(f=>f.px!=null);
+
+  // All entries newest-first
+  const allEntries = Object.entries(records).sort(([a],[b])=>b.localeCompare(a));
+
+  // Filter by range (for chart + stats, use oldest-first)
+  const selRange = RANGES.find(r=>r.k===range);
+  const cutoff   = selRange.days ? new Date(Date.now()-selRange.days*86400000).toISOString().slice(0,10) : null;
+  const filtered = allEntries.filter(([d])=>!cutoff||d>=cutoff); // still newest-first
+  const chartEntries = [...filtered].reverse(); // oldest-first for chart
+
+  // Stats
+  const statsFirst = filtered[filtered.length-1];
+  const statsLast  = filtered[0];
+  const periodChg  = (statsFirst&&statsLast) ? statsLast[1].nw-statsFirst[1].nw : null;
+  const periodPct  = (statsFirst&&statsFirst[1].nw) ? periodChg/Math.abs(statsFirst[1].nw)*100 : null;
+  const allNW      = filtered.map(([,v])=>v.nw);
+  const periodHigh = allNW.length ? Math.max(...allNW) : null;
+  const periodLow  = allNW.length ? Math.min(...allNW) : null;
+
+  // Pagination on filtered list
+  const totalPages = Math.ceil(filtered.length/PAGE_SIZE);
+  const paged = filtered.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
+
+  const delRec = date => {
+    const next={...records}; delete next[date];
+    setRecords(next); ls.set(SK.r,next);
+  };
+
+  // Reset page when range changes
+  const handleRange = r => { setRange(r); setPage(0); };
+
+  return(
+    <div>
+      <PageHeader title="記錄" sub="淨值歷史走勢"/>
+      <div style={{padding:'0 16px'}}>
+
+        {/* Save row */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:12,color:C.muted}}>
+            {autoSave.enabled&&<span style={{color:C.yellow,fontWeight:600}}>⏰ 自動 {autoSave.time}</span>}
+            {lastAutoSaveMsg&&<span style={{color:C.green,marginLeft:8,fontWeight:500}}>{lastAutoSaveMsg}</span>}
+          </div>
+          <Btn onClick={onSave} disabled={!hasPx} color={hasPx?C.yellow:C.border} tc={hasPx?'#1c1c1e':C.muted} style={{fontSize:13,padding:'10px 20px'}}>
+            📸 儲存今日快照
+          </Btn>
+        </div>
+
+        {!hasPx&&<div style={{background:C.yellowLight,border:`1px solid #f0d888`,borderRadius:14,padding:'11px 15px',marginBottom:12,fontSize:13,color:C.yellowDark,fontWeight:500}}>⚠️ 請先更新報價再儲存記錄</div>}
+
+        {/* Chart with range selector */}
+        {allEntries.length>0&&(
+          <Card style={{marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+              <div style={{fontSize:14,fontWeight:700}}>淨值走勢</div>
+              <Pill label={allEntries.length+' 筆'}/>
+            </div>
+            {/* Range buttons */}
+            <div style={{display:'flex',gap:6,marginBottom:14}}>
+              {RANGES.map(r=>(
+                <button key={r.k} onClick={()=>handleRange(r.k)}
+                  style={{flex:1,padding:'6px 4px',borderRadius:10,border:`1.5px solid ${range===r.k?C.yellow:C.border}`,background:range===r.k?C.yellowLight:'white',color:range===r.k?C.yellowDark:C.muted,fontSize:12,fontWeight:range===r.k?700:500,cursor:'pointer'}}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <NWChart entries={chartEntries}/>
+            {/* Period stats */}
+            {filtered.length>=2&&(
+              <div style={{marginTop:12,display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+                {[
+                  ['期初',statsFirst?'NT$'+fmt(statsFirst[1].nw):'-'],
+                  ['期末',statsLast?'NT$'+fmt(statsLast[1].nw):'-'],
+                  ['變化',periodChg!=null?((periodChg>=0?'+':'')+fmt(periodChg)):'-',periodChg>=0?C.green:C.red],
+                  ['漲跌幅',periodPct!=null?((periodPct>=0?'+':'')+periodPct.toFixed(1)+'%'):'-',periodPct>=0?C.green:C.red],
+                  ['區間高','NT$'+fmt(periodHigh)],
+                  ['區間低','NT$'+fmt(periodLow)],
+                  ['筆數',filtered.length+' 筆'],
+                  ['天數',selRange.days?selRange.days+'d':'全部'],
+                ].map(([l,v,col])=>(
+                  <div key={l} style={{background:C.card2,borderRadius:10,padding:'8px 10px'}}>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:600}}>{l}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:col||C.txt}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Gist sync */}
+        <Card style={{marginBottom:12,background:ghToken?C.yellowLight:C.card,border:`1.5px solid ${ghToken?'#f0d888':C.border}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:ghToken?12:0}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:ghToken?C.yellowDark:C.muted}}>{ghToken?'☁️ GitHub Gist 同步':'☁️ 雲端同步未設定'}</div>
+              {gistId&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>Gist: {gistId.slice(0,10)}…</div>}
+              {!ghToken&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>在設定中填入 GitHub Token 以啟用</div>}
+            </div>
+            {!ghToken&&<div style={{fontSize:24}}>🔒</div>}
+          </div>
+          {ghToken&&(<div style={{display:'flex',gap:9}}><Btn onClick={onPush} disabled={!!syncing} color={C.yellow} style={{flex:1,fontSize:13,padding:'10px 12px'}}>{syncing==='push'?'上傳中…':'⬆ 上傳'}</Btn><Btn onClick={onPull} disabled={!!syncing||!gistId} color={C.yellowDark} tc="white" style={{flex:1,fontSize:13,padding:'10px 12px'}}>{syncing==='pull'?'下載中…':'⬇ 下載'}</Btn></div>)}
+          {syncStatus&&<div style={{fontSize:12,marginTop:10,color:syncStatus.ok?C.green:C.red,fontWeight:600}}>{syncStatus.ok?'✅':'❌'} {syncStatus.msg}</div>}
+        </Card>
+
+        {/* Empty state */}
+        {allEntries.length===0&&(<div style={{textAlign:'center',color:C.muted,paddingTop:40}}><div style={{fontSize:48,marginBottom:14}}>📊</div><div style={{fontSize:15,fontWeight:600}}>尚無記錄</div><div style={{fontSize:13,marginTop:6}}>更新報價後點上方按鈕儲存</div></div>)}
+
+        {/* Record list with pagination */}
+        {filtered.length>0&&(
+          <Card>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.muted}}>歷史記錄 · {filtered.length} 筆</div>
+              {totalPages>1&&(
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0}
+                    style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:page===0?'not-allowed':'pointer',color:page===0?C.faint:C.txt,fontWeight:700,fontSize:14,opacity:page===0?0.4:1}}>‹</button>
+                  <span style={{fontSize:12,color:C.muted}}>{page+1}/{totalPages}</span>
+                  <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1}
+                    style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:page===totalPages-1?'not-allowed':'pointer',color:page===totalPages-1?C.faint:C.txt,fontWeight:700,fontSize:14,opacity:page===totalPages-1?0.4:1}}>›</button>
+                </div>
+              )}
+            </div>
+            {paged.map(([date,v],i)=>{
+              const nextEntry = i<paged.length-1 ? paged[i+1] : filtered[page*PAGE_SIZE+i+1];
+              const change = nextEntry ? v.nw-nextEntry[1].nw : null;
+              return(
+                <div key={date}>
+                  {i>0&&<Div/>}
+                  <div style={{padding:'12px 0',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <span style={{fontWeight:700,fontSize:14}}>{date}</span>
+                        {date===today&&<Pill label="今日"/>}
+                      </div>
+                      <div style={{fontSize:12,color:C.muted,marginTop:3}}>資產 {fmt(v.ta/1e6,2)}M · 負債 {fmt(v.tl/1e6,2)}M</div>
+                      {v.usdTwd&&<div style={{fontSize:11,color:C.faint,marginTop:1}}>USD/TWD {(+v.usdTwd).toFixed(2)}</div>}
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:9}}>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontWeight:800,fontSize:15}}>NT${fmt(v.nw)}</div>
+                        {change!=null&&<div style={{fontSize:12,marginTop:2}}><Pnl v={change}/></div>}
+                      </div>
+                      <button onClick={()=>delRec(date)} style={{background:C.redBg,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:C.red,fontWeight:700}}>刪</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Tab Icons ─────────────────────────────────
+const TABS=[
+  {k:'overview',l:'總覽',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>},
+  {k:'stocks', l:'股票',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>},
+  {k:'futures',l:'期貨',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>},
+  {k:'cash',   l:'現金',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/></svg>},
+  {k:'other',  l:'資產',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>},
+  {k:'liab',   l:'負債',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>},
+  {k:'records',l:'記錄',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>},
+];
+
+// ── Main App ──────────────────────────────────
+function App(){
+  const [tab,setTab]           = useState('overview');
+  const [stocks,setStocks]     = useState(()=>ls.get(SK.s)||[]);
+  const [futures,setFutures]   = useState(()=>ls.get(SK.f)||[]);
+  const [cash,setCash]         = useState(()=>ls.get(SK.c)||[]);
+  const [liab,setLiab]         = useState(()=>ls.get(SK.l)||[]);
+  const [other,setOther]       = useState(()=>ls.get(SK.o)||[]);
+  const [fugleKey,setFugleKey] = useState(()=>ls.get(SK.key)||'');
+  const [rates,setRates]       = useState(()=>{ const s=ls.get(SK.rates); if(s)return s; const u=ls.get('ptf:fx')||32; return {...DEF_RATES,USD:u}; });
+  const [records,setRecords]   = useState(()=>ls.get(SK.r)||{});
+  const [ghToken,setGhToken]   = useState(()=>ls.get(SK.gh)||'');
+  const [gistId,setGistId]     = useState(()=>ls.get(SK.gist)||'');
+  const [autoSave,setAutoSave] = useState(()=>ls.get(SK.auto)||{enabled:false,time:'08:00'});
+  const [refreshing,setRef]    = useState(false);
+  const [refStatus,setRS]      = useState('');
+  const [lastUp,setLU]         = useState(null);
+  const [modal,setModal]       = useState(null);
+  const [err,setErr]           = useState('');
+  const [syncing,setSyncing]   = useState(false);
+  const [syncSt,setSyncSt]     = useState(null);
+  const [hidden,setHidden]     = useState(true);
+  const [pendingAutoSave,setPAS] = useState(false);
+  const [lastAutoSaveMsg,setLAM] = useState('');
+
+  useEffect(()=>ls.set(SK.s,stocks),[stocks]);
+  useEffect(()=>ls.set(SK.f,futures),[futures]);
+  useEffect(()=>ls.set(SK.c,cash),[cash]);
+  useEffect(()=>ls.set(SK.l,liab),[liab]);
+  useEffect(()=>ls.set(SK.o,other),[other]);
+  useEffect(()=>ls.set(SK.r,records),[records]);
+  useEffect(()=>ls.set(SK.rates,rates),[rates]);
+
+  // Refs to always read latest state in interval
+  const stateRef = useRef({});
+  useEffect(()=>{ stateRef.current={stocks,futures,cash,liab,other,rates,fugleKey,ghToken,gistId,records}; });
+
+  // Auto-save: after pendingAutoSave=true and refresh done, save record
+  useEffect(()=>{
+    if (!pendingAutoSave||refreshing) return;
+    setPAS(false);
+    const today=new Date().toISOString().slice(0,10);
+    const{ta,tl,nw}=calcNW(stocks,futures,cash,liab,other,rates);
+    const next={...records,[today]:{nw,ta,tl,usdTwd:rates.USD,ts:Date.now()}};
+    setRecords(next); ls.set(SK.r,next);
+    setLAM('自動儲存 '+new Date().toLocaleTimeString('zh-TW'));
+    if (ghToken) {
+      const body=buildPayload(next,stocks,futures,cash,liab,other);
+      pushGistRaw(body,ghToken,gistId).then(id=>{ if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);} }).catch(()=>{});
+    }
+  },[pendingAutoSave,refreshing]);
+
+  // Auto-save timer
+  const autoSaveDoneRef = useRef({date:null});
+  useEffect(()=>{
+    if (!autoSave.enabled) return;
+    const check=()=>{
+      const now=new Date();
+      const hhmm=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+      const today=now.toISOString().slice(0,10);
+      if (hhmm===autoSave.time && autoSaveDoneRef.current.date!==today) {
+        autoSaveDoneRef.current.date=today;
+        const st=stateRef.current;
+        if (!st.fugleKey||(st.stocks.length===0&&st.futures.length===0)) return;
+        setPAS(true);
+        // trigger refresh (uses current state via closure, but stateRef has latest)
+        doRefresh();
+      }
+    };
+    const id=setInterval(check,30000);
+    return()=>clearInterval(id);
+  },[autoSave.enabled,autoSave.time]);
+
+  function buildPayload(recs,s,f,c,l,o){
+    return JSON.stringify({stocks:s.map(x=>({...x,px:undefined})),futures:f.map(x=>({...x,px:undefined})),cash:c,liabilities:l,otherAssets:o,records:recs},null,2);
+  }
+  async function pushGistRaw(payload,token,id){
+    if (id) {
+      const r=await fetch('https://api.github.com/gists/'+id,{method:'PATCH',headers:{'Authorization':'token '+token,'Content-Type':'application/json'},body:JSON.stringify({files:{[GFILE]:{content:payload}}})});
+      if (!r.ok) throw new Error('GitHub '+r.status);
+      return id;
+    } else {
+      const r=await fetch('https://api.github.com/gists',{method:'POST',headers:{'Authorization':'token '+token,'Content-Type':'application/json'},body:JSON.stringify({description:'資產負債組合',public:false,files:{[GFILE]:{content:payload}}})});
+      if (!r.ok) throw new Error('GitHub '+r.status);
+      const d=await r.json();
+      return d.id;
+    }
+  }
+
+  async function fugleQ(sym){
+    const r=await fetch('https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/'+sym,{headers:{'X-API-KEY':fugleKey}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();const px=d.closePrice??d.lastPrice??d.previousClose;if(px==null)throw new Error('無報價');return px;
+  }
+  async function yahooQ(syms){
+    for(const h of['query1','query2']){try{const r=await fetch('https://'+h+'.finance.yahoo.com/v8/finance/quote?symbols='+syms.join(',')+'&fields=regularMarketPrice');if(r.ok)return await r.json();}catch{}}
+    throw new Error('Yahoo Finance 連線失敗');
+  }
+
+  async function doRefresh(){
+    if(refreshing||(stocks.length===0&&futures.length===0))return;
+    if(!fugleKey){setErr('請先在設定中填入 Fugle API Key');return;}
+    setRef(true);setErr('');const errs=[],pm={};
+    const twS=stocks.filter(s=>s.market==='TW');
+    for(let i=0;i<twS.length;i++){const s=twS[i];setRS('台股 '+s.symbol+' '+(i+1)+'/'+twS.length);try{pm[s.symbol+'.TW']=await fugleQ(s.symbol);}catch(e){errs.push(s.symbol+': '+e.message);}}
+    const uniqF=[...new Set(futures.map(f=>f.symbol))];
+    for(let i=0;i<uniqF.length;i++){const fs=uniqF[i];const sp=FUT_SPOT[fs]||fs;setRS('期貨 '+fs+' '+(i+1)+'/'+uniqF.length);try{pm[fs]=await fugleQ(sp);}catch(e){errs.push(fs+': '+e.message);}}
+    setRS('美股 + 匯率…');
+    try{
+      const usS=stocks.filter(s=>s.market==='US');
+      const d=await yahooQ([...usS.map(s=>s.symbol),'TWD=X','EURTWD=X','JPYTWD=X','HKDTWD=X']);
+      const nr={...rates};
+      (d?.quoteResponse?.result||[]).forEach(q=>{
+        if(!q.regularMarketPrice)return;
+        if(q.symbol==='TWD=X')   nr.USD=q.regularMarketPrice;
+        else if(q.symbol==='EURTWD=X')nr.EUR=q.regularMarketPrice;
+        else if(q.symbol==='JPYTWD=X')nr.JPY=q.regularMarketPrice;
+        else if(q.symbol==='HKDTWD=X')nr.HKD=q.regularMarketPrice;
+        else pm[q.symbol]=q.regularMarketPrice;
+      });
+      setRates(nr);
+    }catch(e){errs.push('美股/匯率: '+e.message);}
+    setStocks(prev=>prev.map(s=>{const k=s.market==='TW'?s.symbol+'.TW':s.symbol;return k in pm?{...s,px:pm[k]}:s;}));
+    setFutures(prev=>prev.map(f=>f.symbol in pm?{...f,px:pm[f.symbol]}:f));
+    if(Object.keys(pm).length>0)setLU(new Date());
+    if(errs.length>0)setErr('部分失敗：'+errs.join(' / '));
+    setRS('');setRef(false);
+  }
+
+  async function saveRec(){
+    const today=new Date().toISOString().slice(0,10);
+    const{ta,tl,nw}=calcNW(stocks,futures,cash,liab,other,rates);
+    const next={...records,[today]:{nw,ta,tl,usdTwd:rates.USD,ts:Date.now()}};
+    setRecords(next);ls.set(SK.r,next);
+    if(ghToken){
+      try{
+        const newId=await pushGistRaw(buildPayload(next,stocks,futures,cash,liab,other),ghToken,gistId);
+        if(newId&&newId!==gistId){setGistId(newId);ls.set(SK.gist,newId);}
+        setSyncSt({ok:true,msg:'記錄已儲存並同步 '+new Date().toLocaleTimeString('zh-TW')});
+      }catch(e){setSyncSt({ok:false,msg:'本機已儲存，Gist 失敗：'+e.message});}
+    }
+  }
+
+  async function pushGist(){
+    if(!ghToken)return;setSyncing('push');setSyncSt(null);
+    try{const newId=await pushGistRaw(buildPayload(records,stocks,futures,cash,liab,other),ghToken,gistId);if(newId&&newId!==gistId){setGistId(newId);ls.set(SK.gist,newId);}setSyncSt({ok:true,msg:'上傳成功 '+new Date().toLocaleTimeString('zh-TW')});}
+    catch(e){setSyncSt({ok:false,msg:e.message});}
+    setSyncing(false);
+  }
+  async function pullGist(){
+    if(!ghToken||!gistId)return;setSyncing('pull');setSyncSt(null);
+    try{
+      const res=await fetch('https://api.github.com/gists/'+gistId,{headers:{'Authorization':'token '+ghToken}});
+      if(!res.ok)throw new Error('GitHub '+res.status);
+      const d=await res.json();const raw=d.files?.[GFILE]?.content;if(!raw)throw new Error('找不到資料');
+      const data=JSON.parse(raw);
+      if(data.stocks){setStocks(data.stocks);ls.set(SK.s,data.stocks);}
+      if(data.futures){setFutures(data.futures);ls.set(SK.f,data.futures);}
+      if(data.cash){setCash(data.cash);ls.set(SK.c,data.cash);}
+      if(data.liabilities){setLiab(data.liabilities);ls.set(SK.l,data.liabilities);}
+      if(data.otherAssets){setOther(data.otherAssets);ls.set(SK.o,data.otherAssets);}
+      if(data.records){setRecords(data.records);ls.set(SK.r,data.records);}
+      setSyncSt({ok:true,msg:'下載成功 '+new Date().toLocaleTimeString('zh-TW')});
+    }catch(e){setSyncSt({ok:false,msg:e.message});}
+    setSyncing(false);
+  }
+
+  const noData=stocks.length===0&&futures.length===0;
+  const twS=stocks.filter(s=>s.market==='TW'),usS=stocks.filter(s=>s.market==='US');
+  const fa=item=>{const sym=item.ccy==='TWD'?'NT$':item.ccy==='JPY'?'¥':item.ccy==='EUR'?'€':'$';const d=['USD','EUR'].includes(item.ccy)?2:0;return sym+fmt(item.amount,d);};
+  const FAB_TABS={stocks:()=>setModal('addS'),futures:()=>setModal('addF'),cash:()=>setModal('addC'),other:()=>setModal('addO'),liab:()=>setModal('addL')};
+  const fabAction=FAB_TABS[tab];
+
+  return(
+    <div style={{background:C.bg,minHeight:'100vh',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif',color:C.txt,maxWidth:600,margin:'0 auto'}}>
+      {/* Top bar */}
+      <div style={{background:'rgba(255,255,255,0.94)',backdropFilter:'blur(20px)',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:`1px solid ${C.border}`,position:'sticky',top:0,zIndex:10}}>
+        <div style={{fontSize:11,color:C.muted,fontWeight:500}}>{refStatus?<span style={{color:C.yellow,fontWeight:700}}>{refStatus}</span>:lastUp?'更新於 '+lastUp.toLocaleTimeString('zh-TW'):'尚未更新報價'}</div>
+        <div style={{display:'flex',gap:9,alignItems:'center'}}>
+          {!fugleKey&&<div style={{fontSize:11,color:C.orange,fontWeight:700,background:'#fff3e0',padding:'4px 10px',borderRadius:20}}>⚠ 請設定</div>}
+          <button onClick={()=>setModal('settings')} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:12,width:36,height:36,cursor:'pointer',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>⚙️</button>
+          <button onClick={doRefresh} disabled={refreshing||noData} style={{background:refreshing||noData?C.border:C.yellow,border:'none',borderRadius:12,padding:'8px 14px',cursor:refreshing||noData?'not-allowed':'pointer',fontSize:13,fontWeight:700,color:refreshing||noData?C.muted:'#1c1c1e',opacity:noData?0.5:1}}>{refreshing?'更新中…':'🔄 更新報價'}</button>
+        </div>
+      </div>
+      {err&&<div style={{background:'#fff0ee',color:C.red,padding:'10px 18px',fontSize:13,display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:`1px solid #ffd7d5`}}><span style={{flex:1,fontWeight:500}}>{err}</span><button onClick={()=>setErr('')} style={{background:'none',border:'none',color:C.red,cursor:'pointer',fontSize:20,marginLeft:8,fontWeight:700}}>×</button></div>}
+
+      {/* Content */}
+      <div style={{paddingBottom:120}}>
+        {tab==='overview'&&<Overview stocks={stocks} twS={twS} usS={usS} futs={futures} cash={cash} liabilities={liab} otherAssets={other} rates={rates} setTab={setTab} hidden={hidden} toggleHidden={()=>setHidden(v=>!v)}/>}
+        {tab==='stocks'  &&<StocksTab stocks={stocks} setStocks={setStocks} onEdit={s=>setModal({t:'editS',d:s})}/>}
+        {tab==='futures' &&<FuturesTab futures={futures} setFutures={setFutures} onEdit={f=>setModal({t:'editF',d:f})}/>}
+        {tab==='cash'    &&<ListTab items={cash} setItems={setCash} onEdit={c=>setModal({t:'editC',d:c})} title="現金" sub="存款 · 現金部位" emptyIcon="💵" emptyText="尚未新增現金" renderAmt={item=><span style={{color:C.green,fontWeight:800}}>{fa(item)}</span>} renderSub={item=>item.ccy} strip={[...CCY_OPTS.flatMap(([cy])=>{const t=cash.filter(c=>c.ccy===cy).reduce((s,c)=>s+c.amount,0);return t>0?[[cy,fa({amount:t,ccy:cy})]]:[]}),['筆數',cash.length+' 筆']]}/>}
+        {tab==='other'   &&<ListTab items={other} setItems={setOther} onEdit={o=>setModal({t:'editO',d:o})} title="其他資產" sub="不動產 · 黃金 · 退休金" emptyIcon="🏠" emptyText="尚未新增其他資產" renderAmt={item=><span style={{color:C.purple,fontWeight:800}}>{fa(item)}</span>} renderSub={item=>item.note?item.ccy+' · '+item.note:item.ccy} strip={[['TWD 合計','NT$'+fmt(other.filter(o=>o.ccy==='TWD').reduce((s,o)=>s+o.amount,0))],['項目數',other.length+' 項']]}/>}
+        {tab==='liab'    &&<ListTab items={liab} setItems={setLiab} onEdit={l=>setModal({t:'editL',d:l})} title="負債" sub="貸款 · 信用卡 · 質押" emptyIcon="💳" emptyText="尚無負債記錄" renderAmt={item=><span style={{color:C.red,fontWeight:800}}>{fa(item)}</span>} renderSub={item=>item.rate?item.ccy+' · 年利率 '+item.rate+'%':item.ccy} strip={[['負債總計 TWD','NT$'+fmt(liab.filter(l=>l.ccy==='TWD').reduce((s,l)=>s+l.amount,0)),C.red],...(liab.filter(l=>l.rate).length>0?[['加權利率',(liab.filter(l=>l.rate).reduce((s,l)=>s+l.rate*l.amount,0)/liab.filter(l=>l.rate).reduce((s,l)=>s+l.amount,1)).toFixed(2)+'%']]:[]),['筆數',liab.length+' 筆']]}/>}
+        {tab==='records' &&<RecordsTab records={records} setRecords={setRecords} onSave={saveRec} onPush={pushGist} onPull={pullGist} syncing={syncing} syncStatus={syncSt} ghToken={ghToken} gistId={gistId} stocks={stocks} futures={futures} autoSave={autoSave} lastAutoSaveMsg={lastAutoSaveMsg}/>}
+      </div>
+
+      {/* Bottom Tab Bar */}
+      <div style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:600,background:'rgba(255,255,255,0.97)',backdropFilter:'blur(24px)',borderTop:`1px solid ${C.border}`,display:'flex',alignItems:'center',paddingBottom:'env(safe-area-inset-bottom,8px)',paddingTop:6,zIndex:10}}>
+        {TABS.map(({k,l,icon})=>(<button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:'4px 2px 4px',background:'none',border:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>{icon(tab===k)}<span style={{fontSize:10,fontWeight:tab===k?800:500,color:tab===k?C.yellow:C.faint,letterSpacing:-0.2}}>{l}</span></button>))}
+      </div>
+      {fabAction&&<button onClick={fabAction} style={{position:'fixed',bottom:72,right:'max(16px, calc(50vw - 284px))',zIndex:20,width:52,height:52,borderRadius:'50%',background:C.yellow,border:'none',cursor:'pointer',fontSize:24,boxShadow:'0 4px 20px rgba(245,183,49,0.5)',display:'flex',alignItems:'center',justifyContent:'center',color:'#1c1c1e',fontWeight:700}}>＋</button>}
+
+      {/* Modals */}
+      {modal==='settings' &&<SettingsModal fugleKey={fugleKey} setFugleKey={setFugleKey} ghToken={ghToken} setGhToken={setGhToken} gistId={gistId} setGistId={setGistId} autoSave={autoSave} setAutoSave={setAutoSave} onClose={()=>setModal(null)}/>}
+      {modal==='addS'     &&<StockModal  onClose={()=>setModal(null)} onSave={s=>{setStocks(p=>[...p,{...s,id:Date.now(),px:null}]);setModal(null);}}/>}
+      {modal?.t==='editS' &&<StockModal  initial={modal.d} onClose={()=>setModal(null)} onSave={s=>{setStocks(p=>p.map(x=>x.id===modal.d.id?{...x,...s}:x));setModal(null);}}/>}
+      {modal==='addF'     &&<FutureModal onClose={()=>setModal(null)} onSave={f=>{setFutures(p=>[...p,{...f,id:Date.now(),px:null}]);setModal(null);}}/>}
+      {modal?.t==='editF' &&<FutureModal initial={modal.d} onClose={()=>setModal(null)} onSave={f=>{setFutures(p=>p.map(x=>x.id===modal.d.id?{...x,...f}:x));setModal(null);}}/>}
+      {modal==='addC'     &&<CashModal   onClose={()=>setModal(null)} onSave={c=>{setCash(p=>[...p,{...c,id:Date.now()}]);setModal(null);}}/>}
+      {modal?.t==='editC' &&<CashModal   initial={modal.d} onClose={()=>setModal(null)} onSave={c=>{setCash(p=>p.map(x=>x.id===modal.d.id?{...x,...c}:x));setModal(null);}}/>}
+      {modal==='addL'     &&<LiabModal   onClose={()=>setModal(null)} onSave={l=>{setLiab(p=>[...p,{...l,id:Date.now()}]);setModal(null);}}/>}
+      {modal?.t==='editL' &&<LiabModal   initial={modal.d} onClose={()=>setModal(null)} onSave={l=>{setLiab(p=>p.map(x=>x.id===modal.d.id?{...x,...l}:x));setModal(null);}}/>}
+      {modal==='addO'     &&<OtherModal  onClose={()=>setModal(null)} onSave={o=>{setOther(p=>[...p,{...o,id:Date.now()}]);setModal(null);}}/>}
+      {modal?.t==='editO' &&<OtherModal  initial={modal.d} onClose={()=>setModal(null)} onSave={o=>{setOther(p=>p.map(x=>x.id===modal.d.id?{...x,...o}:x));setModal(null);}}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
