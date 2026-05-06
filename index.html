@@ -52,6 +52,32 @@ const ls = {
 };
 
 function fmt(n,d=0){if(n==null||isNaN(n))return'—';return n.toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d});}
+
+// ── Relative time label ───────────────────────
+// input: Date object or ISO date string (YYYY-MM-DD) or timestamp ms
+function relTime(input){
+  if(!input) return '';
+  const isDateOnly = typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input);
+  const today = new Date(); today.setHours(0,0,0,0);
+  if(isDateOnly){
+    const d = new Date(input); d.setHours(0,0,0,0);
+    const diff = Math.round((today - d)/86400000);
+    if(diff===0) return '今日';
+    if(diff===1) return '昨日';
+    if(diff<=6)  return diff+'日前';
+    return diff+'天前';
+  }
+  // Date object or ms — show time + relative day label
+  const dt = input instanceof Date ? input : new Date(input);
+  const dtDay = new Date(dt); dtDay.setHours(0,0,0,0);
+  const diff = Math.round((today - dtDay)/86400000);
+  const timeStr = dt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  if(diff===0) return '今日 '+timeStr;
+  if(diff===1) return '昨日 '+timeStr;
+  if(diff<=6)  return diff+'日前 '+timeStr;
+  return diff+'天前 '+timeStr;
+}
+
 function Pnl({v,d=0}){
   if(v==null||isNaN(v))return<span style={{color:C.muted}}>—</span>;
   return<span style={{color:v>=0?C.green:C.red,fontWeight:700}}>{v>=0?'+':''}{fmt(v,d)}</span>;
@@ -214,8 +240,17 @@ function StocksTab({stocks,setStocks,onEdit}){
 function FuturesTab({futures,setFutures,onEdit}){
   const del=id=>setFutures(p=>p.filter(f=>f.id!==id));
   const tPnl=futures.filter(f=>f.px!=null).reduce((s,f)=>s+(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult,0);
-  const tMgn=futures.reduce((s,f)=>s+(f.margin||0),0);const hasPx=futures.some(f=>f.px!=null);
-  return(<div><PageHeader title="期貨" sub="指數期貨 · 個股期貨"/><div style={{padding:'0 16px'}}>{futures.length>0&&<Strip items={[['未實現損益',hasPx?(tPnl>=0?'+':'')+fmt(tPnl)+' TWD':'需更新',hasPx?(tPnl>=0?C.green:C.red):C.muted],['保證金','NT$'+fmt(tMgn)],['部位數',futures.length+' 個']]}/>}{futures.length===0&&<div style={{textAlign:'center',color:C.muted,paddingTop:60}}><div style={{fontSize:48,marginBottom:14}}>📭</div><div style={{fontSize:15,fontWeight:600}}>尚無期貨部位</div></div>}{futures.map(f=>{const pnl=f.px!=null?(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult:null;const pts=f.px!=null?(f.dir==='long'?1:-1)*(f.px-f.entry):null;return(<Card key={f.id}><div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}><div><div style={{display:'flex',alignItems:'center',gap:9,marginBottom:5}}><span style={{fontWeight:800,fontSize:18}}>{f.symbol}</span><span style={{background:f.dir==='long'?C.greenBg:C.redBg,color:f.dir==='long'?C.green:C.red,borderRadius:20,fontSize:12,padding:'3px 10px',fontWeight:700}}>{f.dir==='long'?'做多 ▲':'做空 ▼'}</span></div><div style={{fontSize:12,color:C.muted}}>{f.name} · 參考 {FUT_SPOT[f.symbol]||f.symbol}</div></div><div style={{textAlign:'right'}}>{f.px!=null?<><div style={{fontWeight:800,fontSize:17}}>{fmt(f.px)}</div><div style={{fontSize:11,color:C.muted}}>現價</div></>:<div style={{color:C.muted,fontSize:13}}>待更新</div>}</div></div><div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:14}}>{[['進場均價',fmt(f.entry)],['口數',f.lots+' 口'],['乘數',fmt(f.mult)],['保證金',f.margin?'NT$'+fmt(f.margin):'—']].map(([l,v])=>(<div key={l} style={{background:C.card2,borderRadius:12,padding:'9px 10px'}}><div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:600}}>{l}</div><div style={{fontSize:13,fontWeight:700}}>{v}</div></div>))}</div><Div/><div style={{paddingTop:13,display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><div style={{fontSize:11,color:C.muted,marginBottom:3,fontWeight:600}}>未實現損益 TWD</div><div style={{fontSize:20,fontWeight:800}}>{pnl!=null?<Pnl v={pnl}/>:<span style={{color:C.muted,fontSize:14}}>需更新報價</span>}</div>{pts!=null&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{pts>=0?'+':''}{fmt(pts)} 點</div>}</div><RowBtns onEdit={()=>onEdit(f)} onDel={()=>del(f.id)}/></div></Card>);})}</div></div>);
+  const tMgn=futures.reduce((s,f)=>s+(f.margin||0),0);
+  const hasPx=futures.some(f=>f.px!=null);
+  // 最新保證金 = 原始保證金合計 + 未實現損益（僅在有報價時計算）
+  const latestMgn = hasPx ? tMgn + tPnl : null;
+  const stripItems = [
+    ['最新保證金', hasPx ? 'NT$'+fmt(latestMgn) : '需更新', hasPx ? (latestMgn >= tMgn ? C.green : C.red) : C.muted],
+    ['原始保證金', 'NT$'+fmt(tMgn)],
+    ['未實現損益', hasPx ? (tPnl>=0?'+':'')+fmt(tPnl)+' TWD' : '需更新', hasPx ? (tPnl>=0?C.green:C.red) : C.muted],
+    ['部位數', futures.length+' 個'],
+  ];
+  return(<div><PageHeader title="期貨" sub="指數期貨 · 個股期貨"/><div style={{padding:'0 16px'}}>{futures.length>0&&<Strip items={stripItems}/>}{futures.length===0&&<div style={{textAlign:'center',color:C.muted,paddingTop:60}}><div style={{fontSize:48,marginBottom:14}}>📭</div><div style={{fontSize:15,fontWeight:600}}>尚無期貨部位</div></div>}{futures.map(f=>{const pnl=f.px!=null?(f.dir==='long'?1:-1)*(f.px-f.entry)*f.lots*f.mult:null;const pts=f.px!=null?(f.dir==='long'?1:-1)*(f.px-f.entry):null;const fLatest=f.margin&&f.px!=null?f.margin+pnl:null;return(<Card key={f.id}><div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}><div><div style={{display:'flex',alignItems:'center',gap:9,marginBottom:5}}><span style={{fontWeight:800,fontSize:18}}>{f.symbol}</span><span style={{background:f.dir==='long'?C.greenBg:C.redBg,color:f.dir==='long'?C.green:C.red,borderRadius:20,fontSize:12,padding:'3px 10px',fontWeight:700}}>{f.dir==='long'?'做多 ▲':'做空 ▼'}</span></div><div style={{fontSize:12,color:C.muted}}>{f.name} · 參考 {FUT_SPOT[f.symbol]||f.symbol}</div></div><div style={{textAlign:'right'}}>{f.px!=null?<><div style={{fontWeight:800,fontSize:17}}>{fmt(f.px)}</div><div style={{fontSize:11,color:C.muted}}>現價</div></>:<div style={{color:C.muted,fontSize:13}}>待更新</div>}</div></div><div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:14}}>{[['進場均價',fmt(f.entry)],['口數',f.lots+' 口'],['乘數',fmt(f.mult)],['原始保證金',f.margin?'NT$'+fmt(f.margin):'—']].map(([l,v])=>(<div key={l} style={{background:C.card2,borderRadius:12,padding:'9px 10px'}}><div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:600}}>{l}</div><div style={{fontSize:13,fontWeight:700}}>{v}</div></div>))}</div>{fLatest!=null&&<div style={{background:fLatest>=f.margin?C.greenBg:C.redBg,borderRadius:12,padding:'9px 14px',marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}><div style={{fontSize:12,color:C.muted,fontWeight:600}}>最新保證金</div><div style={{fontWeight:800,fontSize:14,color:fLatest>=f.margin?C.green:C.red}}>NT${fmt(fLatest)}</div></div>}<Div/><div style={{paddingTop:13,display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><div style={{fontSize:11,color:C.muted,marginBottom:3,fontWeight:600}}>未實現損益 TWD</div><div style={{fontSize:20,fontWeight:800}}>{pnl!=null?<Pnl v={pnl}/>:<span style={{color:C.muted,fontSize:14}}>需更新報價</span>}</div>{pts!=null&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{pts>=0?'+':''}{fmt(pts)} 點</div>}</div><RowBtns onEdit={()=>onEdit(f)} onDel={()=>del(f.id)}/></div></Card>);})}</div></div>);
 }
 
 // ── Generic List Tab ──────────────────────────
@@ -280,7 +315,7 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><div style={{fontSize:13,fontWeight:600,color:C.muted}}>歷史記錄 · {filtered.length} 筆</div>
           {totalPages>1&&<div style={{display:'flex',alignItems:'center',gap:8}}><button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:page===0?'not-allowed':'pointer',color:page===0?C.faint:C.txt,fontWeight:700,fontSize:14,opacity:page===0?0.4:1}}>‹</button><span style={{fontSize:12,color:C.muted}}>{page+1}/{totalPages}</span><button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1} style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:page===totalPages-1?'not-allowed':'pointer',color:page===totalPages-1?C.faint:C.txt,fontWeight:700,fontSize:14,opacity:page===totalPages-1?0.4:1}}>›</button></div>}
         </div>
-        {paged.map(([date,v],i)=>{const ne=i<paged.length-1?paged[i+1]:filtered[page*PAGE_SIZE+i+1];const ch=ne?v.nw-ne[1].nw:null;return(<div key={date}>{i>0&&<Div/>}<div style={{padding:'12px 0',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontWeight:700,fontSize:14}}>{date}</span>{date===today&&<Pill label="今日"/>}</div><div style={{fontSize:12,color:C.muted,marginTop:3}}>資產 {fmt(v.ta/1e6,2)}M · 負債 {fmt(v.tl/1e6,2)}M</div>{v.usdTwd&&<div style={{fontSize:11,color:C.faint,marginTop:1}}>USD/TWD {(+v.usdTwd).toFixed(2)}</div>}</div><div style={{display:'flex',alignItems:'center',gap:9}}><div style={{textAlign:'right'}}><div style={{fontWeight:800,fontSize:15}}>NT${fmt(v.nw)}</div>{ch!=null&&<div style={{fontSize:12,marginTop:2}}><Pnl v={ch}/></div>}</div><button onClick={()=>delRec(date)} style={{background:C.redBg,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:C.red,fontWeight:700}}>刪</button></div></div></div>);})}
+        {paged.map(([date,v],i)=>{const ne=i<paged.length-1?paged[i+1]:filtered[page*PAGE_SIZE+i+1];const ch=ne?v.nw-ne[1].nw:null;return(<div key={date}>{i>0&&<Div/>}<div style={{padding:'12px 0',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontWeight:700,fontSize:14}}>{date}</span><span style={{fontSize:11,color:C.muted}}>{relTime(date)}</span>{date===today&&<Pill label="今日"/>}</div><div style={{fontSize:12,color:C.muted,marginTop:3}}>資產 {fmt(v.ta/1e6,2)}M · 負債 {fmt(v.tl/1e6,2)}M</div>{v.usdTwd&&<div style={{fontSize:11,color:C.faint,marginTop:1}}>USD/TWD {(+v.usdTwd).toFixed(2)}</div>}</div><div style={{display:'flex',alignItems:'center',gap:9}}><div style={{textAlign:'right'}}><div style={{fontWeight:800,fontSize:15}}>NT${fmt(v.nw)}</div>{ch!=null&&<div style={{fontSize:12,marginTop:2}}><Pnl v={ch}/></div>}</div><button onClick={()=>delRec(date)} style={{background:C.redBg,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:C.red,fontWeight:700}}>刪</button></div></div></div>);})}
       </Card>}
     </div></div>
   );
@@ -334,7 +369,7 @@ function App(){
   const stateRef=useRef({});
   useEffect(()=>{ stateRef.current={stocks,futures,cash,liab,other,rates,fugleKey,gasUrl,ghToken,gistId,records}; });
 
-  // Auto-save trigger after refresh completes
+  // Auto-save: execute after refresh completes
   useEffect(()=>{
     if(!pendingAS||refreshing)return;
     setPAS(false);
@@ -342,20 +377,25 @@ function App(){
     const{ta,tl,nw}=calcNW(stocks,futures,cash,liab,other,rates);
     const next={...records,[today]:{nw,ta,tl,usdTwd:rates.USD,ts:Date.now()}};
     setRecords(next);ls.set(SK.r,next);
-    setLAM('自動儲存 '+new Date().toLocaleTimeString('zh-TW'));
+    setLAM('自動儲存 '+relTime(new Date()));
     if(ghToken){const body=buildPayload(next,stocks,futures,cash,liab,other);pushGistRaw(body,ghToken,gistId).then(id=>{if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}}).catch(()=>{});}
   },[pendingAS,refreshing]);
 
-  // Auto-save timer
+  // Auto-save timer — fix: set pendingAS AFTER calling doRefresh so refreshing=true is guaranteed before effect fires
   const asDoneRef=useRef({date:null});
   useEffect(()=>{
     if(!autoSave.enabled)return;
-    const check=()=>{
-      const now=new Date();const hhmm=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');const today=now.toISOString().slice(0,10);
+    const check=async()=>{
+      const now=new Date();
+      const hhmm=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+      const today=now.toISOString().slice(0,10);
       if(hhmm===autoSave.time&&asDoneRef.current.date!==today){
         asDoneRef.current.date=today;
-        const st=stateRef.current;if(!st.fugleKey||(st.stocks.length===0&&st.futures.length===0))return;
-        setPAS(true);doRefresh();
+        const st=stateRef.current;
+        if(!st.fugleKey||(st.stocks.length===0&&st.futures.length===0))return;
+        // start refresh first, then mark pending — ensures refreshing=true before pendingAS effect can fire
+        await doRefresh();
+        setPAS(true);
       }
     };
     const id=setInterval(check,30000);return()=>clearInterval(id);
@@ -379,21 +419,18 @@ function App(){
     if(!fugleKey){setErr('請先在設定中填入 Fugle API Key');return;}
     setRef(true);setErr('');const errs=[],pm={};
 
-    // 台股 via Fugle
     const twS=stocks.filter(s=>s.market==='TW');
     for(let i=0;i<twS.length;i++){
       const s=twS[i];setRS('台股 '+s.symbol+' '+(i+1)+'/'+twS.length);
       try{pm[s.symbol+'.TW']=await fugleQ(s.symbol);}catch(e){errs.push(s.symbol+': '+e.message);}
     }
 
-    // 期貨 via Fugle（現貨指數替代）
     const uniqF=[...new Set(futures.map(f=>f.symbol))];
     for(let i=0;i<uniqF.length;i++){
       const fs=uniqF[i];const sp=FUT_SPOT[fs]||fs;setRS('期貨 '+fs+' '+(i+1)+'/'+uniqF.length);
       try{pm[fs]=await fugleQ(sp);}catch(e){errs.push(fs+': '+e.message);}
     }
 
-    // 美股 + 匯率 via Google Apps Script → Yahoo Finance
     const usS=stocks.filter(s=>s.market==='US');
     const fxSyms=['TWD=X','EURTWD=X','JPYTWD=X','HKDTWD=X'];
     const yahooSyms=[...usS.map(s=>s.symbol),...fxSyms];
@@ -404,9 +441,7 @@ function App(){
         const r=await fetch(gasUrl+'?symbols='+encodeURIComponent(yahooSyms.join(',')));
         if(!r.ok)throw new Error('GAS HTTP '+r.status);
         const data=await r.json();
-        // 美股
         usS.forEach(s=>{if(data[s.symbol]!=null)pm[s.symbol]=data[s.symbol];});
-        // 匯率
         const nr={...rates};
         if(data['TWD=X'])    nr.USD=+data['TWD=X'].toFixed(4);
         if(data['EURTWD=X']) nr.EUR=+data['EURTWD=X'].toFixed(4);
@@ -420,7 +455,8 @@ function App(){
 
     setStocks(prev=>prev.map(s=>{const k=s.market==='TW'?s.symbol+'.TW':s.symbol;return k in pm?{...s,px:pm[k]}:s;}));
     setFutures(prev=>prev.map(f=>f.symbol in pm?{...f,px:pm[f.symbol]}:f));
-    if(Object.keys(pm).length>0)setLU(new Date());
+    const now=new Date();
+    if(Object.keys(pm).length>0)setLU(now);
     if(errs.length>0)setErr('部分失敗：'+errs.join(' / '));
     setRS('');setRef(false);
   }
@@ -430,10 +466,10 @@ function App(){
     const{ta,tl,nw}=calcNW(stocks,futures,cash,liab,other,rates);
     const next={...records,[today]:{nw,ta,tl,usdTwd:rates.USD,ts:Date.now()}};
     setRecords(next);ls.set(SK.r,next);
-    if(ghToken){try{const id=await pushGistRaw(buildPayload(next,stocks,futures,cash,liab,other),ghToken,gistId);if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}setSyncSt({ok:true,msg:'記錄已儲存並同步 '+new Date().toLocaleTimeString('zh-TW')});}catch(e){setSyncSt({ok:false,msg:'本機已儲存，Gist 失敗：'+e.message});}}
+    if(ghToken){try{const id=await pushGistRaw(buildPayload(next,stocks,futures,cash,liab,other),ghToken,gistId);if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}setSyncSt({ok:true,msg:'記錄已儲存並同步 '+relTime(new Date())});}catch(e){setSyncSt({ok:false,msg:'本機已儲存，Gist 失敗：'+e.message});}}
   }
-  async function pushGist(){if(!ghToken)return;setSyncing('push');setSyncSt(null);try{const id=await pushGistRaw(buildPayload(records,stocks,futures,cash,liab,other),ghToken,gistId);if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}setSyncSt({ok:true,msg:'上傳成功 '+new Date().toLocaleTimeString('zh-TW')});}catch(e){setSyncSt({ok:false,msg:e.message});}setSyncing(false);}
-  async function pullGist(){if(!ghToken||!gistId)return;setSyncing('pull');setSyncSt(null);try{const res=await fetch('https://api.github.com/gists/'+gistId,{headers:{'Authorization':'token '+ghToken}});if(!res.ok)throw new Error('GitHub '+res.status);const d=await res.json();const raw=d.files?.[GFILE]?.content;if(!raw)throw new Error('找不到資料');const data=JSON.parse(raw);if(data.stocks){setStocks(data.stocks);ls.set(SK.s,data.stocks);}if(data.futures){setFutures(data.futures);ls.set(SK.f,data.futures);}if(data.cash){setCash(data.cash);ls.set(SK.c,data.cash);}if(data.liabilities){setLiab(data.liabilities);ls.set(SK.l,data.liabilities);}if(data.otherAssets){setOther(data.otherAssets);ls.set(SK.o,data.otherAssets);}if(data.records){setRecords(data.records);ls.set(SK.r,data.records);}setSyncSt({ok:true,msg:'下載成功 '+new Date().toLocaleTimeString('zh-TW')});}catch(e){setSyncSt({ok:false,msg:e.message});}setSyncing(false);}
+  async function pushGist(){if(!ghToken)return;setSyncing('push');setSyncSt(null);try{const id=await pushGistRaw(buildPayload(records,stocks,futures,cash,liab,other),ghToken,gistId);if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}setSyncSt({ok:true,msg:'上傳成功 '+relTime(new Date())});}catch(e){setSyncSt({ok:false,msg:e.message});}setSyncing(false);}
+  async function pullGist(){if(!ghToken||!gistId)return;setSyncing('pull');setSyncSt(null);try{const res=await fetch('https://api.github.com/gists/'+gistId,{headers:{'Authorization':'token '+ghToken}});if(!res.ok)throw new Error('GitHub '+res.status);const d=await res.json();const raw=d.files?.[GFILE]?.content;if(!raw)throw new Error('找不到資料');const data=JSON.parse(raw);if(data.stocks){setStocks(data.stocks);ls.set(SK.s,data.stocks);}if(data.futures){setFutures(data.futures);ls.set(SK.f,data.futures);}if(data.cash){setCash(data.cash);ls.set(SK.c,data.cash);}if(data.liabilities){setLiab(data.liabilities);ls.set(SK.l,data.liabilities);}if(data.otherAssets){setOther(data.otherAssets);ls.set(SK.o,data.otherAssets);}if(data.records){setRecords(data.records);ls.set(SK.r,data.records);}setSyncSt({ok:true,msg:'下載成功 '+relTime(new Date())});}catch(e){setSyncSt({ok:false,msg:e.message});}setSyncing(false);}
 
   const noData=stocks.length===0&&futures.length===0;
   const twS=stocks.filter(s=>s.market==='TW'),usS=stocks.filter(s=>s.market==='US');
@@ -443,7 +479,13 @@ function App(){
   return(
     <div style={{background:C.bg,minHeight:'100vh',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif',color:C.txt,maxWidth:600,margin:'0 auto'}}>
       <div style={{background:'rgba(255,255,255,0.94)',backdropFilter:'blur(20px)',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:`1px solid ${C.border}`,position:'sticky',top:0,zIndex:10}}>
-        <div style={{fontSize:11,color:C.muted,fontWeight:500}}>{refStatus?<span style={{color:C.yellow,fontWeight:700}}>{refStatus}</span>:lastUp?'更新於 '+lastUp.toLocaleTimeString('zh-TW'):'尚未更新報價'}</div>
+        <div style={{fontSize:11,color:C.muted,fontWeight:500}}>
+          {refStatus
+            ? <span style={{color:C.yellow,fontWeight:700}}>{refStatus}</span>
+            : lastUp
+              ? <span>更新於 {relTime(lastUp)}</span>
+              : '尚未更新報價'}
+        </div>
         <div style={{display:'flex',gap:9,alignItems:'center'}}>
           {!fugleKey&&<div style={{fontSize:11,color:C.orange,fontWeight:700,background:'#fff3e0',padding:'4px 10px',borderRadius:20}}>⚠ 請設定</div>}
           <button onClick={()=>setModal('settings')} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:12,width:36,height:36,cursor:'pointer',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>⚙️</button>
