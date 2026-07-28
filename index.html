@@ -478,19 +478,23 @@ function buildRiskMap(stocks, futures, rates){
     const px = s.px ?? s.cost;
     const risk = s.market==='US' ? px*s.qty*usdRate : px*s.qty;
     const sym = s.symbol;
-    if(!map[sym]) map[sym]={symbol:sym,name:s.name||sym,risk:0,types:[]};
+    if(!map[sym]) map[sym]={symbol:sym,name:s.name||sym,risk:0,hasStock:false,futureRisk:0};
     map[sym].risk += risk;
-    if(!map[sym].types.includes('股票')) map[sym].types.push('股票');
+    map[sym].hasStock = true;
   });
   futures.forEach(f => {
     const px = f.px ?? f.entry;
-    const nominal = px * f.lots * f.mult;
+    const dir = f.dir==='long' ? 1 : -1;
+    const nominal = px * f.lots * f.mult * dir;
     const sym = f.symbol;
-    if(!map[sym]) map[sym]={symbol:sym,name:f.name||sym,risk:0,types:[]};
+    if(!map[sym]) map[sym]={symbol:sym,name:f.name||sym,risk:0,hasStock:false,futureRisk:0};
     map[sym].risk += nominal;
-    if(!map[sym].types.includes('期貨')) map[sym].types.push('期貨');
+    map[sym].futureRisk = (map[sym].futureRisk||0) + nominal;
+    if(!map[sym].name || map[sym].name===sym) map[sym].name = f.name||sym;
   });
-  return Object.values(map).filter(x=>x.risk>0).sort((a,b)=>b.risk-a.risk);
+  return Object.values(map)
+    .filter(x=>x.risk!==0)
+    .sort((a,b)=>Math.abs(b.risk)-Math.abs(a.risk));
 }
 
 function PieChart({items, total}){
@@ -499,7 +503,7 @@ function PieChart({items, total}){
   const CX=110, CY=110, R=90, IR=52;
   let angle = -Math.PI/2;
   const slices = items.map((item,i) => {
-    const pct = item.risk/total;
+    const pct = Math.abs(item.risk)/totalAbs;
     const sweep = pct*2*Math.PI;
     const x1 = CX+R*Math.cos(angle);
     const y1 = CY+R*Math.sin(angle);
@@ -528,13 +532,13 @@ function PieChart({items, total}){
       {hov ? (
         <g>
           <text x={CX} y={CY-10} textAnchor="middle" style={{fontSize:11,fontWeight:700,fill:C.txt}}>{hov.item.symbol}</text>
-          <text x={CX} y={CY+6}  textAnchor="middle" style={{fontSize:10,fill:C.muted}}>{(hov.pct*100).toFixed(1)}%</text>
-          <text x={CX} y={CY+20} textAnchor="middle" style={{fontSize:9,fill:C.faint}}>NT${fmt(Math.round(hov.item.risk/1000))}K</text>
+          <text x={CX} y={CY+6}  textAnchor="middle" style={{fontSize:10,fill:hov.item.risk<0?C.red:C.muted}}>{hov.item.risk<0?'淨空 ':''}{(Math.abs(hov.item.risk)/totalAbs*100).toFixed(1)}%</text>
+          <text x={CX} y={CY+20} textAnchor="middle" style={{fontSize:9,fill:C.faint}}>{hov.item.risk<0?'-':''}NT${fmt(Math.round(Math.abs(hov.item.risk)/1000))}K</text>
         </g>
       ) : (
         <g>
-          <text x={CX} y={CY-4}  textAnchor="middle" style={{fontSize:10,fill:C.muted}}>Total</text>
-          <text x={CX} y={CY+11} textAnchor="middle" style={{fontSize:10,fontWeight:700,fill:C.txt}}>NT${fmt(Math.round(total/1e6),1)}M</text>
+          <text x={CX} y={CY-4}  textAnchor="middle" style={{fontSize:10,fill:C.muted}}>淨曝險</text>
+          <text x={CX} y={CY+11} textAnchor="middle" style={{fontSize:10,fontWeight:700,fill:totalNet<0?C.red:C.txt}}>{totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)/1e6),1)}M</text>
         </g>
       )}
     </svg>
@@ -544,12 +548,26 @@ function PieChart({items, total}){
 function RiskExposure({stocks, futures, rates, nw}){
   const items = buildRiskMap(stocks, futures, rates);
   if(!items.length) return null;
-  const total = items.reduce((s,x)=>s+x.risk, 0);
-  const leverage = nw>0 ? total/nw : null;
+  // total = sum of absolute values for exposure sizing; net for leverage
+  const totalAbs = items.reduce((s,x)=>s+Math.abs(x.risk), 0);
+  const totalNet = items.reduce((s,x)=>s+x.risk, 0);
+  const leverage = nw>0 ? totalNet/nw : null;
   const TOP = 6;
   const legendItems = items.length>TOP
-    ? [...items.slice(0,TOP), {symbol:'其他',name:'其他',risk:items.slice(TOP).reduce((s,x)=>s+x.risk,0),types:[]}]
+    ? [...items.slice(0,TOP), {symbol:'其他',name:'其他',risk:items.slice(TOP).reduce((s,x)=>s+x.risk,0),hasStock:false,futureRisk:0}]
     : items;
+
+  // helper: tag string + color for an item
+  const getTag = item => {
+    const hasFut = item.futureRisk !== 0;
+    const netFut = item.futureRisk || 0;
+    if(item.hasStock && hasFut){
+      return item.risk >= 0 ? {label:'現+期(多)',color:C.green} : {label:'現+期(空)',color:C.red};
+    }
+    if(item.hasStock) return {label:'股票',color:C.blue};
+    if(netFut < 0)    return {label:'期貨(空)',color:C.red};
+    return {label:'期貨(多)',color:C.orange};
+  };
   return(
     <Card style={{marginBottom:12}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
@@ -569,37 +587,37 @@ function RiskExposure({stocks, futures, rates, nw}){
       <div style={{marginBottom:16}}>
         <PieChart items={items} total={total}/>
         <div style={{display:'flex',flexWrap:'wrap',gap:'6px 14px',marginTop:12}}>
-          {legendItems.map((item,i)=>(
-            <div key={item.symbol} style={{display:'flex',alignItems:'center',gap:6,minWidth:80}}>
-              <div style={{width:9,height:9,borderRadius:'50%',flexShrink:0,
-                background:i<TOP?PIE_COLORS[i%PIE_COLORS.length]:C.faint}}/>
-              <span style={{fontSize:12,fontWeight:700}}>{item.symbol}</span>
-              {item.types&&item.types.length>1&&
-                <span style={{fontSize:10,color:C.muted,fontWeight:500}}>現+期</span>}
-              <span style={{fontSize:11,color:C.muted,marginLeft:'auto'}}>{(item.risk/total*100).toFixed(1)}%</span>
-            </div>
-          ))}
+          {legendItems.map((item,i)=>{
+            const tag = getTag(item);
+            return(
+              <div key={item.symbol} style={{display:'flex',alignItems:'center',gap:6,minWidth:80}}>
+                <div style={{width:9,height:9,borderRadius:'50%',flexShrink:0,
+                  background:i<TOP?PIE_COLORS[i%PIE_COLORS.length]:C.faint}}/>
+                <span style={{fontSize:12,fontWeight:700,color:item.risk<0?C.red:'inherit'}}>{item.symbol}</span>
+                <span style={{fontSize:11,color:C.muted,marginLeft:'auto'}}>{item.risk<0?'-':''}{(Math.abs(item.risk)/totalAbs*100).toFixed(1)}%</span>
+              </div>
+            );
+          })}
         </div>
       </div>
       <Div/>
       <div style={{marginTop:12}}>
         {items.map((item,i)=>{
-          const pct = item.risk/total;
-          const barColor = PIE_COLORS[i%PIE_COLORS.length];
-          const tag = item.types.includes('股票')&&item.types.includes('期貨')?'現+期'
-                    : item.types.includes('期貨')?'期貨':'股票';
+          const pct = Math.abs(item.risk)/totalAbs;
+          const barColor = item.risk<0 ? C.red : PIE_COLORS[i%PIE_COLORS.length];
+          const tag = getTag(item);
           return(
             <div key={item.symbol} style={{marginBottom:11}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
                 <div style={{display:'flex',alignItems:'center',gap:7}}>
-                  <span style={{fontSize:13,fontWeight:800}}>{item.symbol}</span>
-                  <span style={{fontSize:10,color:C.muted,background:C.card2,borderRadius:6,padding:'2px 7px'}}>{tag}</span>
+                  <span style={{fontSize:13,fontWeight:800,color:item.risk<0?C.red:'inherit'}}>{item.symbol}</span>
+                  <span style={{fontSize:10,fontWeight:700,background:item.risk<0?C.redBg:C.card2,color:tag.color,borderRadius:6,padding:'2px 7px'}}>{tag.label}</span>
                   {item.name&&item.name!==item.symbol&&
                     <span style={{fontSize:11,color:C.muted}}>{item.name}</span>}
                 </div>
                 <div style={{textAlign:'right'}}>
-                  <span style={{fontSize:13,fontWeight:700}}>NT${fmt(Math.round(item.risk))}</span>
-                  <span style={{fontSize:11,color:C.muted,marginLeft:8}}>{(pct*100).toFixed(1)}%</span>
+                  <span style={{fontSize:13,fontWeight:700,color:item.risk<0?C.red:'inherit'}}>{item.risk<0?'-':''}NT${fmt(Math.round(Math.abs(item.risk)))}</span>
+                  <span style={{fontSize:11,color:C.muted,marginLeft:8}}>{item.risk<0?'-':''}{(pct*100).toFixed(1)}%</span>
                 </div>
               </div>
               <div style={{height:5,borderRadius:3,background:C.card2,overflow:'hidden'}}>
@@ -610,8 +628,8 @@ function RiskExposure({stocks, futures, rates, nw}){
         })}
       </div>
       <div style={{marginTop:8,paddingTop:10,borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <span style={{fontSize:12,color:C.muted,fontWeight:600}}>合計風險曝險</span>
-        <span style={{fontSize:14,fontWeight:800}}>NT${fmt(Math.round(total))}</span>
+        <span style={{fontSize:12,color:C.muted,fontWeight:600}}>淨風險曝險</span>
+        <span style={{fontSize:14,fontWeight:800,color:totalNet<0?C.red:'inherit'}}>{totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)))}</span>
       </div>
     </Card>
   );
