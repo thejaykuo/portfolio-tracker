@@ -98,6 +98,44 @@ function calcNW(stocks,futures,cash,liabilities,otherAssets,rates){
   return {ta,tl,nw:ta-tl};
 }
 
+// ── Risk map ──────────────────────────────────
+// Each entry: { symbol, name, risk (net, signed), hasStock, futureRisk (net, signed) }
+function buildRiskMap(stocks, futures, rates){
+  const usdRate = rates.USD || 32;
+  const map = {};
+  stocks.forEach(s => {
+    const px = s.px ?? s.cost;
+    const risk = s.market==='US' ? px*s.qty*usdRate : px*s.qty;
+    const sym = s.symbol;
+    if(!map[sym]) map[sym]={symbol:sym,name:s.name||sym,risk:0,hasStock:false,futureRisk:0};
+    map[sym].risk += risk;
+    map[sym].hasStock = true;
+  });
+  futures.forEach(f => {
+    const px = f.px ?? f.entry;
+    const sign = f.dir==='long' ? 1 : -1;
+    const nominal = px * f.lots * f.mult * sign;
+    const sym = f.symbol;
+    if(!map[sym]) map[sym]={symbol:sym,name:f.name||sym,risk:0,hasStock:false,futureRisk:0};
+    map[sym].risk += nominal;
+    map[sym].futureRisk += nominal;
+    if(!map[sym].hasStock) map[sym].name = f.name||sym;
+  });
+  // filter out fully hedged (net zero) and sort by abs
+  return Object.values(map)
+    .filter(x => Math.round(Math.abs(x.risk)) > 0)
+    .sort((a,b) => Math.abs(b.risk)-Math.abs(a.risk));
+}
+
+function getTag(item){
+  const hasFut = Math.round(Math.abs(item.futureRisk)) > 0;
+  if(item.hasStock && hasFut)
+    return item.risk>=0 ? {label:'現+期(多)',color:C.green} : {label:'現+期(空)',color:C.red};
+  if(item.hasStock) return {label:'股票',color:C.blue};
+  if(item.futureRisk < 0) return {label:'期貨(空)',color:C.red};
+  return {label:'期貨(多)',color:C.orange};
+}
+
 // ── Primitives ────────────────────────────────
 function PageHeader({title,sub}){
   return(
@@ -471,33 +509,7 @@ function Strip({items}){
 }
 
 // ── Risk Exposure ─────────────────────────────
-function buildRiskMap(stocks, futures, rates){
-  const usdRate = rates.USD || 32;
-  const map = {};
-  stocks.forEach(s => {
-    const px = s.px ?? s.cost;
-    const risk = s.market==='US' ? px*s.qty*usdRate : px*s.qty;
-    const sym = s.symbol;
-    if(!map[sym]) map[sym]={symbol:sym,name:s.name||sym,risk:0,hasStock:false,futureRisk:0};
-    map[sym].risk += risk;
-    map[sym].hasStock = true;
-  });
-  futures.forEach(f => {
-    const px = f.px ?? f.entry;
-    const dir = f.dir==='long' ? 1 : -1;
-    const nominal = px * f.lots * f.mult * dir;
-    const sym = f.symbol;
-    if(!map[sym]) map[sym]={symbol:sym,name:f.name||sym,risk:0,hasStock:false,futureRisk:0};
-    map[sym].risk += nominal;
-    map[sym].futureRisk = (map[sym].futureRisk||0) + nominal;
-    if(!map[sym].name || map[sym].name===sym) map[sym].name = f.name||sym;
-  });
-  return Object.values(map)
-    .filter(x=>x.risk!==0)
-    .sort((a,b)=>Math.abs(b.risk)-Math.abs(a.risk));
-}
-
-function PieChart({items, total}){
+function PieChart({items, totalAbs, totalNet}){
   const [hovered, setHovered] = useState(null);
   if(!items.length) return null;
   const CX=110, CY=110, R=90, IR=52;
@@ -512,11 +524,12 @@ function PieChart({items, total}){
     const y2 = CY+R*Math.sin(angle);
     const large = sweep>Math.PI?1:0;
     const path = `M${CX},${CY} L${x1},${y1} A${R},${R},0,${large},1,${x2},${y2} Z`;
-    return {path, color:PIE_COLORS[i%PIE_COLORS.length], pct, item, sweep};
+    const color = item.risk<0 ? '#ff3b30' : PIE_COLORS[i%PIE_COLORS.length];
+    return {path, color, pct, item};
   });
   const hov = hovered!=null ? slices[hovered] : null;
   return(
-    <svg viewBox="0 0 220 220" style={{width:'100%',maxWidth:220,display:'block',margin:'0 auto'}}>
+    <svg viewBox="0 0 220 220" style={{width:'100%',display:'block',margin:'0 auto'}}>
       {slices.map((s,i)=>(
         <path key={i} d={s.path} fill={s.color}
           opacity={hovered==null||hovered===i?1:0.35}
@@ -531,14 +544,20 @@ function PieChart({items, total}){
       <circle cx={CX} cy={CY} r={IR} fill={C.card}/>
       {hov ? (
         <g>
-          <text x={CX} y={CY-10} textAnchor="middle" style={{fontSize:11,fontWeight:700,fill:C.txt}}>{hov.item.symbol}</text>
-          <text x={CX} y={CY+6}  textAnchor="middle" style={{fontSize:10,fill:hov.item.risk<0?C.red:C.muted}}>{hov.item.risk<0?'淨空 ':''}{(Math.abs(hov.item.risk)/totalAbs*100).toFixed(1)}%</text>
-          <text x={CX} y={CY+20} textAnchor="middle" style={{fontSize:9,fill:C.faint}}>{hov.item.risk<0?'-':''}NT${fmt(Math.round(Math.abs(hov.item.risk)/1000))}K</text>
+          <text x={CX} y={CY-10} textAnchor="middle" style={{fontSize:11,fontWeight:700,fill:hov.item.risk<0?C.red:C.txt}}>{hov.item.symbol}</text>
+          <text x={CX} y={CY+6}  textAnchor="middle" style={{fontSize:10,fill:hov.item.risk<0?C.red:C.muted}}>
+            {hov.item.risk<0?'空 ':''}{(Math.abs(hov.item.risk)/totalAbs*100).toFixed(1)}%
+          </text>
+          <text x={CX} y={CY+20} textAnchor="middle" style={{fontSize:9,fill:C.faint}}>
+            {hov.item.risk<0?'-':''}NT${fmt(Math.round(Math.abs(hov.item.risk)/1000))}K
+          </text>
         </g>
       ) : (
         <g>
           <text x={CX} y={CY-4}  textAnchor="middle" style={{fontSize:10,fill:C.muted}}>淨曝險</text>
-          <text x={CX} y={CY+11} textAnchor="middle" style={{fontSize:10,fontWeight:700,fill:totalNet<0?C.red:C.txt}}>{totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)/1e6),1)}M</text>
+          <text x={CX} y={CY+11} textAnchor="middle" style={{fontSize:10,fontWeight:700,fill:totalNet<0?C.red:C.txt}}>
+            {totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)/1e6),1)}M
+          </text>
         </g>
       )}
     </svg>
@@ -548,7 +567,6 @@ function PieChart({items, total}){
 function RiskExposure({stocks, futures, rates, nw}){
   const items = buildRiskMap(stocks, futures, rates);
   if(!items.length) return null;
-  // total = sum of absolute values for exposure sizing; net for leverage
   const totalAbs = items.reduce((s,x)=>s+Math.abs(x.risk), 0);
   const totalNet = items.reduce((s,x)=>s+x.risk, 0);
   const leverage = nw>0 ? totalNet/nw : null;
@@ -556,18 +574,6 @@ function RiskExposure({stocks, futures, rates, nw}){
   const legendItems = items.length>TOP
     ? [...items.slice(0,TOP), {symbol:'其他',name:'其他',risk:items.slice(TOP).reduce((s,x)=>s+x.risk,0),hasStock:false,futureRisk:0}]
     : items;
-
-  // helper: tag string + color for an item
-  const getTag = item => {
-    const hasFut = item.futureRisk !== 0;
-    const netFut = item.futureRisk || 0;
-    if(item.hasStock && hasFut){
-      return item.risk >= 0 ? {label:'現+期(多)',color:C.green} : {label:'現+期(空)',color:C.red};
-    }
-    if(item.hasStock) return {label:'股票',color:C.blue};
-    if(netFut < 0)    return {label:'期貨(空)',color:C.red};
-    return {label:'期貨(多)',color:C.orange};
-  };
   return(
     <Card style={{marginBottom:12}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
@@ -583,29 +589,33 @@ function RiskExposure({stocks, futures, rates, nw}){
           </div>
         </div>
       </div>
-      <div style={{fontSize:11,color:C.muted,marginBottom:14}}>名目風險敞口 · 股票市值 + 期貨名目</div>
+      <div style={{fontSize:11,color:C.muted,marginBottom:14}}>名目風險敞口 · 股票市值 + 期貨名目（含方向）</div>
+
+      {/* pie chart */}
       <div style={{marginBottom:16}}>
-        <PieChart items={items} total={total}/>
+        <PieChart items={items} totalAbs={totalAbs} totalNet={totalNet}/>
         <div style={{display:'flex',flexWrap:'wrap',gap:'6px 14px',marginTop:12}}>
-          {legendItems.map((item,i)=>{
-            const tag = getTag(item);
-            return(
-              <div key={item.symbol} style={{display:'flex',alignItems:'center',gap:6,minWidth:80}}>
-                <div style={{width:9,height:9,borderRadius:'50%',flexShrink:0,
-                  background:i<TOP?PIE_COLORS[i%PIE_COLORS.length]:C.faint}}/>
-                <span style={{fontSize:12,fontWeight:700,color:item.risk<0?C.red:'inherit'}}>{item.symbol}</span>
-                <span style={{fontSize:11,color:C.muted,marginLeft:'auto'}}>{item.risk<0?'-':''}{(Math.abs(item.risk)/totalAbs*100).toFixed(1)}%</span>
-              </div>
-            );
-          })}
+          {legendItems.map((item,i)=>(
+            <div key={item.symbol} style={{display:'flex',alignItems:'center',gap:6,minWidth:80}}>
+              <div style={{width:9,height:9,borderRadius:'50%',flexShrink:0,
+                background:item.risk<0?C.red:(i<TOP?PIE_COLORS[i%PIE_COLORS.length]:C.faint)}}/>
+              <span style={{fontSize:12,fontWeight:700,color:item.risk<0?C.red:'inherit'}}>{item.symbol}</span>
+              <span style={{fontSize:11,color:C.muted,marginLeft:'auto'}}>
+                {item.risk<0?'-':''}{(Math.abs(item.risk)/totalAbs*100).toFixed(1)}%
+              </span>
+            </div>
+          ))}
         </div>
       </div>
+
       <Div/>
+
+      {/* ranked list */}
       <div style={{marginTop:12}}>
         {items.map((item,i)=>{
           const pct = Math.abs(item.risk)/totalAbs;
-          const barColor = item.risk<0 ? C.red : PIE_COLORS[i%PIE_COLORS.length];
           const tag = getTag(item);
+          const barColor = item.risk<0 ? C.red : PIE_COLORS[i%PIE_COLORS.length];
           return(
             <div key={item.symbol} style={{marginBottom:11}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
@@ -616,8 +626,12 @@ function RiskExposure({stocks, futures, rates, nw}){
                     <span style={{fontSize:11,color:C.muted}}>{item.name}</span>}
                 </div>
                 <div style={{textAlign:'right'}}>
-                  <span style={{fontSize:13,fontWeight:700,color:item.risk<0?C.red:'inherit'}}>{item.risk<0?'-':''}NT${fmt(Math.round(Math.abs(item.risk)))}</span>
-                  <span style={{fontSize:11,color:C.muted,marginLeft:8}}>{item.risk<0?'-':''}{(pct*100).toFixed(1)}%</span>
+                  <span style={{fontSize:13,fontWeight:700,color:item.risk<0?C.red:'inherit'}}>
+                    {item.risk<0?'-':''}NT${fmt(Math.round(Math.abs(item.risk)))}
+                  </span>
+                  <span style={{fontSize:11,color:C.muted,marginLeft:8}}>
+                    {item.risk<0?'-':''}{(pct*100).toFixed(1)}%
+                  </span>
                 </div>
               </div>
               <div style={{height:5,borderRadius:3,background:C.card2,overflow:'hidden'}}>
@@ -627,9 +641,12 @@ function RiskExposure({stocks, futures, rates, nw}){
           );
         })}
       </div>
+
       <div style={{marginTop:8,paddingTop:10,borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <span style={{fontSize:12,color:C.muted,fontWeight:600}}>淨風險曝險</span>
-        <span style={{fontSize:14,fontWeight:800,color:totalNet<0?C.red:'inherit'}}>{totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)))}</span>
+        <span style={{fontSize:14,fontWeight:800,color:totalNet<0?C.red:'inherit'}}>
+          {totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)))}
+        </span>
       </div>
     </Card>
   );
@@ -870,23 +887,17 @@ function NWChart({entries}){
   const col=vals[vals.length-1]>=vals[0]?C.yellow:C.red;
   const n=entries.length;
   const lbls=n<=6?entries.map((_,i)=>i):[0,Math.floor(n/4),Math.floor(n/2),Math.floor(3*n/4),n-1];
-
-  const handleMove = e => {
-    const svg = e.currentTarget;
-    const rect = svg.getBoundingClientRect();
-    const rawX = (e.clientX - rect.left) / rect.width * W;
-    // find nearest point
+  const handleMove=e=>{
+    const svg=e.currentTarget;
+    const rect=svg.getBoundingClientRect();
+    const rawX=(e.clientX-rect.left)/rect.width*W;
     let best=0, bestD=Infinity;
-    pts.forEach((p,i)=>{ const d=Math.abs(p.x-rawX); if(d<bestD){bestD=d;best=i;} });
+    pts.forEach((p,i)=>{const d=Math.abs(p.x-rawX);if(d<bestD){bestD=d;best=i;}});
     setHov(best);
   };
-
-  const hp = hov!=null ? pts[hov] : null;
-  const he = hov!=null ? entries[hov] : null;
-  // tooltip: flip to left if near right edge
-  const tipX = hp ? (hp.x > W*0.65 ? hp.x-4 : hp.x+4) : 0;
-  const tipAnchor = hp ? (hp.x > W*0.65 ? 'end' : 'start') : 'start';
-
+  const hp=hov!=null?pts[hov]:null;
+  const he=hov!=null?entries[hov]:null;
+  const tipRight=hp&&hp.x>W*0.65;
   return(
     <svg viewBox={'0 0 '+W+' '+H} style={{width:'100%',display:'block',cursor:'crosshair'}}
       onMouseMove={handleMove} onMouseLeave={()=>setHov(null)}>
@@ -907,9 +918,9 @@ function NWChart({entries}){
         <g>
           <line x1={hp.x} y1={PT} x2={hp.x} y2={PT+cH} stroke={col} strokeWidth="1" strokeDasharray="3,2" opacity="0.5"/>
           <circle cx={hp.x} cy={hp.y} r="5" fill={col} stroke="#fff" strokeWidth="1.5"/>
-          <rect x={tipX+(tipAnchor==='start'?2:-82)} y={hp.y-22} width="80" height="20" rx="5" fill="rgba(28,28,30,0.82)"/>
-          <text x={tipX+(tipAnchor==='start'?42:-42)} y={hp.y-14} textAnchor="middle" style={{fontSize:8.5,fill:'#fff',fontWeight:700}}>{he[0].slice(5)}</text>
-          <text x={tipX+(tipAnchor==='start'?42:-42)} y={hp.y-5}  textAnchor="middle" style={{fontSize:8,fill:'rgba(255,255,255,0.75)'}}>{fmt(Math.round(he[1].nw/1000))}K</text>
+          <rect x={tipRight?hp.x-84:hp.x+4} y={hp.y-24} width="80" height="22" rx="5" fill="rgba(28,28,30,0.85)"/>
+          <text x={tipRight?hp.x-44:hp.x+44} y={hp.y-14} textAnchor="middle" style={{fontSize:8.5,fill:'#fff',fontWeight:700}}>{he[0].slice(5)}</text>
+          <text x={tipRight?hp.x-44:hp.x+44} y={hp.y-4}  textAnchor="middle" style={{fontSize:8,fill:'rgba(255,255,255,0.8)'}}>NT${fmt(Math.round(he[1].nw/1000))}K</text>
         </g>
       )}
     </svg>
@@ -1160,10 +1171,6 @@ function App(){
     if(px==null) throw new Error('無報價');
     return px;
   }
-  async function doRefreshAndSave(){
-    await doRefresh();
-    setPAS(true);
-  }
   async function doRefresh(){
     if(refreshing||(stocks.length===0&&futures.length===0)) return;
     if(!fugleKey){setErr('請先在設定中填入 Fugle API Key');return;}
@@ -1203,6 +1210,10 @@ function App(){
     if(Object.keys(pm).length>0) setLU(new Date());
     if(errs.length>0) setErr('部分失敗：'+errs.join(' / '));
     setRS(''); setRef(false);
+  }
+  async function doRefreshAndSave(){
+    await doRefresh();
+    setPAS(true);
   }
   async function saveRec(){
     const today=new Date().toISOString().slice(0,10);
