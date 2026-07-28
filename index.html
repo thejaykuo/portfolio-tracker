@@ -593,7 +593,9 @@ function RiskExposure({stocks, futures, rates, nw}){
 
       {/* pie chart */}
       <div style={{marginBottom:16}}>
-        <PieChart items={items} totalAbs={totalAbs} totalNet={totalNet}/>
+        <div style={{maxWidth:220,margin:'0 auto'}}>
+          <PieChart items={items} totalAbs={totalAbs} totalNet={totalNet}/>
+        </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:'6px 14px',marginTop:12}}>
           {legendItems.map((item,i)=>(
             <div key={item.symbol} style={{display:'flex',alignItems:'center',gap:6,minWidth:80}}>
