@@ -556,7 +556,7 @@ function PieChart({items, totalAbs, totalNet}){
         <g>
           <text x={CX} y={CY-4}  textAnchor="middle" style={{fontSize:10,fill:C.muted}}>淨曝險</text>
           <text x={CX} y={CY+11} textAnchor="middle" style={{fontSize:10,fontWeight:700,fill:totalNet<0?C.red:C.txt}}>
-            {totalNet<0?'-':''}NT${fmt(Math.round(Math.abs(totalNet)/1e6),1)}M
+            {totalNet<0?'-':''}NT${(Math.abs(totalNet)/1e6).toFixed(1)}M
           </text>
         </g>
       )}
