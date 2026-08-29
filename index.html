@@ -921,7 +921,7 @@ function NWChart({entries}){
           <line x1={hp.x} y1={PT} x2={hp.x} y2={PT+cH} stroke={col} strokeWidth="1" strokeDasharray="3,2" opacity="0.5"/>
           <circle cx={hp.x} cy={hp.y} r="5" fill={col} stroke="#fff" strokeWidth="1.5"/>
           <rect x={tipRight?hp.x-84:hp.x+4} y={hp.y-24} width="80" height="22" rx="5" fill="rgba(28,28,30,0.85)"/>
-          <text x={tipRight?hp.x-44:hp.x+44} y={hp.y-14} textAnchor="middle" style={{fontSize:8.5,fill:'#fff',fontWeight:700}}>{he[0].slice(5)}</text>
+          <text x={tipRight?hp.x-44:hp.x+44} y={hp.y-14} textAnchor="middle" style={{fontSize:8.5,fill:'#fff',fontWeight:700}}>{he[0]}</text>
           <text x={tipRight?hp.x-44:hp.x+44} y={hp.y-4}  textAnchor="middle" style={{fontSize:8,fill:'rgba(255,255,255,0.8)'}}>NT${fmt(Math.round(he[1].nw/1000))}K</text>
         </g>
       )}
@@ -1099,12 +1099,20 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <div style={{fontSize:13,fontWeight:600,color:C.muted}}>歷史記錄 · {filtered.length} 筆</div>
               {totalPages>1&&(
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0}
-                    style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:page===0?'not-allowed':'pointer',color:page===0?C.faint:C.txt,fontWeight:700,fontSize:14,opacity:page===0?0.4:1}}>‹</button>
-                  <span style={{fontSize:12,color:C.muted}}>{page+1}/{totalPages}</span>
-                  <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1}
-                    style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:page===totalPages-1?'not-allowed':'pointer',color:page===totalPages-1?C.faint:C.txt,fontWeight:700,fontSize:14,opacity:page===totalPages-1?0.4:1}}>›</button>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  {[
+                    {label:'«',action:()=>setPage(0),disabled:page===0},
+                    {label:'‹',action:()=>setPage(p=>Math.max(0,p-1)),disabled:page===0},
+                    {label:null},
+                    {label:'›',action:()=>setPage(p=>Math.min(totalPages-1,p+1)),disabled:page===totalPages-1},
+                    {label:'»',action:()=>setPage(totalPages-1),disabled:page===totalPages-1},
+                  ].map((btn,i)=>btn.label===null
+                    ? <span key={i} style={{fontSize:12,color:C.muted,minWidth:36,textAlign:'center'}}>{page+1}/{totalPages}</span>
+                    : <button key={i} onClick={btn.disabled?undefined:btn.action} disabled={btn.disabled}
+                        style={{background:C.card2,border:'none',borderRadius:8,width:28,height:28,cursor:btn.disabled?'not-allowed':'pointer',color:btn.disabled?C.faint:C.txt,fontWeight:700,fontSize:13,opacity:btn.disabled?0.4:1}}>
+                        {btn.label}
+                      </button>
+                  )}
                 </div>
               )}
             </div>
