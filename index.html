@@ -881,14 +881,18 @@ function NWChart({entries}){
   const cW=W-PL-PR, cH=H-PT-PB;
   const vals=entries.map(([,v])=>v.nw);
   const mn=Math.min(...vals), mx=Math.max(...vals), rng=mx-mn||1;
-  const toX=i=>PL+(i/(entries.length-1))*cW;
+  // real-time X axis
+  const times=entries.map(([d])=>new Date(d).getTime());
+  const tMin=Math.min(...times), tMax=Math.max(...times), tRange=tMax-tMin||1;
+  const toX=t=>PL+((t-tMin)/tRange)*cW;
   const toY=v=>PT+cH-((v-mn)/rng)*cH;
-  const pts=entries.map(([,v],i)=>({x:toX(i),y:toY(v.nw)}));
+  const pts=entries.map(([d,v])=>({x:toX(new Date(d).getTime()),y:toY(v.nw)}));
   const poly=pts.map(p=>p.x+','+p.y).join(' ');
-  const area=PL+','+(PT+cH)+' '+poly+' '+toX(entries.length-1)+','+(PT+cH);
+  const area=PL+','+(PT+cH)+' '+poly+' '+pts[pts.length-1].x+','+(PT+cH);
   const col=vals[vals.length-1]>=vals[0]?C.yellow:C.red;
-  const n=entries.length;
-  const lbls=n<=6?entries.map((_,i)=>i):[0,Math.floor(n/4),Math.floor(n/2),Math.floor(3*n/4),n-1];
+  // 5 evenly-spaced time labels across real date range
+  const labelTs=Array.from({length:5},(_,i)=>tMin+i/4*tRange);
+  const fmtLbl=ts=>{const d=new Date(ts);return(d.getMonth()+1)+'/\''+String(d.getFullYear()).slice(2);};
   const handleMove=e=>{
     const svg=e.currentTarget;
     const rect=svg.getBoundingClientRect();
@@ -913,7 +917,9 @@ function NWChart({entries}){
       <polyline points={poly} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
       <circle cx={pts[0].x} cy={pts[0].y} r="4" fill={col}/>
       <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="5" fill={col}/>
-      {lbls.map(i=>(<text key={i} x={toX(i)} y={H-6} textAnchor="middle" style={{fontSize:9,fill:C.muted}}>{entries[i][0].slice(5)}</text>))}
+      {labelTs.map((ts,i)=>(
+        <text key={i} x={toX(ts)} y={H-6} textAnchor="middle" style={{fontSize:9,fill:C.muted}}>{fmtLbl(ts)}</text>
+      ))}
       <text x={PL} y={PT+cH-2} textAnchor="start" style={{fontSize:9,fill:C.faint}}>{(mn/1e6).toFixed(1)}M</text>
       <text x={PL} y={PT+10}   textAnchor="start" style={{fontSize:9,fill:C.faint}}>{(mx/1e6).toFixed(1)}M</text>
       {hp&&he&&(
