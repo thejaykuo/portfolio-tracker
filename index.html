@@ -929,10 +929,79 @@ function NWChart({entries}){
   );
 }
 
+// ── Import Modal ──────────────────────────────
+function ImportModal({onClose, onImport}){
+  const [raw, setRaw] = useState('');
+  const [preview, setPreview] = useState([]);
+  const [err, setErr] = useState('');
+
+  const parse = text => {
+    const lines = text.trim().split('\n').filter(l=>l.trim());
+    const result = [], errors = [];
+    lines.forEach((line, i) => {
+      const parts = line.trim().split(/[\t,，\s]+/);
+      if(parts.length < 2){ errors.push('第'+(i+1)+'行格式錯誤'); return; }
+      const datePart = parts[0].trim();
+      const numPart  = parts.slice(1).join('').replace(/,/g,'').trim();
+      // parse date: YYYY/M/D or YYYY-M-D
+      const dm = datePart.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+      if(!dm){ errors.push('第'+(i+1)+'行日期無法解析: '+datePart); return; }
+      const dateKey = dm[1]+'-'+dm[2].padStart(2,'0')+'-'+dm[3].padStart(2,'0');
+      const nw = parseInt(numPart, 10);
+      if(isNaN(nw)){ errors.push('第'+(i+1)+'行數值無法解析: '+numPart); return; }
+      result.push({date: dateKey, nw});
+    });
+    return {result, errors};
+  };
+
+  useEffect(()=>{
+    if(!raw.trim()){ setPreview([]); setErr(''); return; }
+    const {result, errors} = parse(raw);
+    setPreview(result);
+    setErr(errors.length ? errors.slice(0,3).join('\n')+(errors.length>3?' …等':'') : '');
+  }, [raw]);
+
+  const doImport = () => {
+    if(!preview.length) return;
+    onImport(preview);
+    onClose();
+  };
+
+  return(
+    <Modal title="批次匯入歷史記錄" onClose={onClose}>
+      <div style={{fontSize:12,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+        每行一筆，格式：<b>YYYY/M/D</b>（Tab 或空格）<b>淨值</b><br/>
+        匯入後將 merge 進現有記錄，相同日期以匯入值覆蓋。
+      </div>
+      <textarea
+        value={raw} onChange={e=>setRaw(e.target.value)}
+        placeholder={'2023/7/12\t8,587,842\n2023/7/31\t8,929,838\n…'}
+        style={{width:'100%',minHeight:180,background:C.card2,border:`1.5px solid ${C.border}`,
+          borderRadius:12,padding:'12px 14px',fontSize:13,color:C.txt,resize:'vertical',
+          fontFamily:'monospace',lineHeight:1.6}}
+      />
+      {err&&<div style={{background:C.redBg,color:C.red,borderRadius:10,padding:'8px 12px',fontSize:12,marginTop:8,whiteSpace:'pre-line'}}>{err}</div>}
+      {preview.length>0&&(
+        <div style={{background:C.greenBg,borderRadius:10,padding:'8px 12px',fontSize:12,color:C.green,marginTop:8,fontWeight:600}}>
+          ✓ 解析成功 {preview.length} 筆，範圍 {preview[0].date} ～ {preview[preview.length-1].date}
+        </div>
+      )}
+      <div style={{display:'flex',gap:10,marginTop:14}}>
+        <GBtn onClick={onClose} color={C.faint} style={{flex:1}}>取消</GBtn>
+        <Btn onClick={doImport} disabled={!preview.length} color={C.blue} tc="white" style={{flex:2}}>
+          匯入 {preview.length>0?preview.length+'筆':''}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Records Tab ───────────────────────────────
-function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,ghToken,gistId,stocks,futures,autoSave,lastASMsg}){
-  const [range,setRange]=useState('ALL');
+function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,ghToken,gistId,stocks,futures,autoSave,lastASMsg,onImportRaw}){
+  const [range,setRange]=useState('1Y');
   const [page,setPage]=useState(0);
+  const [showImport,setShowImport]=useState(false);
+  const [confirmDel,setConfirmDel]=useState(null); // date string to confirm
   const today=new Date().toISOString().slice(0,10);
   const hasPx=stocks.some(s=>s.px!=null)||futures.some(f=>f.px!=null);
   const allEntries=Object.entries(records).sort(([a],[b])=>b.localeCompare(a));
@@ -948,7 +1017,7 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
   const periodLow=allNW.length?Math.min(...allNW):null;
   const totalPages=Math.ceil(filtered.length/PAGE_SIZE);
   const paged=filtered.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
-  const delRec=date=>{const next={...records};delete next[date];setRecords(next);ls.set(SK.r,next);};
+  const delRec=date=>{const next={...records};delete next[date];setRecords(next);ls.set(SK.r,next);setConfirmDel(null);};
   return(
     <div>
       <PageHeader title="記錄" sub="淨值歷史走勢"/>
@@ -958,7 +1027,10 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
             {autoSave.enabled&&<span style={{color:C.yellow,fontWeight:600}}>⏰ 自動 {autoSave.time}</span>}
             {lastASMsg&&<span style={{color:C.green,marginLeft:8,fontWeight:500}}>{lastASMsg}</span>}
           </div>
+          <div style={{display:'flex',gap:8}}>
+          <GBtn onClick={()=>setShowImport(true)} color={C.blue} style={{fontSize:13,padding:'10px 14px'}}>📥 匯入</GBtn>
           <Btn onClick={onSave} disabled={!hasPx} color={hasPx?C.yellow:C.border} tc={hasPx?'#1c1c1e':C.muted} style={{fontSize:13,padding:'10px 20px'}}>📸 儲存今日快照</Btn>
+        </div>
         </div>
         {!hasPx&&<div style={{background:C.yellowLight,border:`1px solid #f0d888`,borderRadius:14,padding:'11px 15px',marginBottom:12,fontSize:13,color:C.yellowDark,fontWeight:500}}>⚠️ 請先更新報價再儲存記錄</div>}
         {allEntries.length>0&&(
@@ -1039,6 +1111,8 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
             {paged.map(([date,v],i)=>{
               const ne=i<paged.length-1?paged[i+1]:filtered[page*PAGE_SIZE+i+1];
               const ch=ne?v.nw-ne[1].nw:null;
+              const pct=ch!=null&&ne[1].nw?ch/Math.abs(ne[1].nw)*100:null;
+              const isConfirming = confirmDel===date;
               return(
                 <div key={date}>
                   {i>0&&<Div/>}
@@ -1055,9 +1129,21 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
                     <div style={{display:'flex',alignItems:'center',gap:9}}>
                       <div style={{textAlign:'right'}}>
                         <div style={{fontWeight:800,fontSize:15}}>NT${fmt(v.nw)}</div>
-                        {ch!=null&&<div style={{fontSize:12,marginTop:2}}><Pnl v={ch}/></div>}
+                        {ch!=null&&(
+                          <div style={{fontSize:12,marginTop:2,display:'flex',gap:5,justifyContent:'flex-end',alignItems:'center'}}>
+                            <Pnl v={ch}/>
+                            {pct!=null&&<span style={{color:ch>=0?C.green:C.red,fontWeight:600}}>({pct>=0?'+':''}{pct.toFixed(1)}%)</span>}
+                          </div>
+                        )}
                       </div>
-                      <button onClick={()=>delRec(date)} style={{background:C.redBg,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:C.red,fontWeight:700}}>刪</button>
+                      {isConfirming ? (
+                        <div style={{display:'flex',gap:5}}>
+                          <button onClick={()=>setConfirmDel(null)} style={{background:C.card2,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:C.muted,fontWeight:700}}>否</button>
+                          <button onClick={()=>delRec(date)} style={{background:C.red,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:'#fff',fontWeight:700}}>確認</button>
+                        </div>
+                      ) : (
+                        <button onClick={()=>setConfirmDel(date)} style={{background:C.redBg,border:'none',borderRadius:10,padding:'5px 10px',fontSize:12,cursor:'pointer',color:C.red,fontWeight:700}}>刪</button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1065,6 +1151,7 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
             })}
           </Card>
         )}
+      {showImport&&<ImportModal onClose={()=>setShowImport(false)} onImport={onImportRaw}/>}
       </div>
     </div>
   );
@@ -1217,6 +1304,19 @@ function App(){
     await doRefresh();
     setPAS(true);
   }
+  function importRaw(entries){
+    // entries: [{date: 'YYYY-MM-DD', nw: number}]
+    const next = {...records};
+    entries.forEach(({date, nw}) => {
+      next[date] = {nw, ta: nw, tl: 0, imported: true, ts: Date.now()};
+    });
+    setRecords(next); ls.set(SK.r, next);
+    if(ghToken){
+      pushGistRaw(buildPayload(next,stocks,futures,cash,liab,other),ghToken,gistId)
+        .then(id=>{if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}})
+        .catch(()=>{});
+    }
+  }
   async function saveRec(){
     const today=new Date().toISOString().slice(0,10);
     const {ta,tl,nw}=calcNW(stocks,futures,cash,liab,other,rates);
@@ -1302,7 +1402,7 @@ function App(){
         {tab==='cash'    &&<ListTab items={cash} setItems={setCash} onEdit={c=>setModal({t:'editC',d:c})} title="現金" sub="存款 · 現金部位" emptyIcon="💵" emptyText="尚未新增現金" renderAmt={item=><span style={{color:C.green,fontWeight:800}}>{fa(item)}</span>} renderSub={item=>item.ccy} strip={[...CCY_OPTS.flatMap(([cy])=>{const t=cash.filter(c=>c.ccy===cy).reduce((s,c)=>s+c.amount,0);return t>0?[[cy,fa({amount:t,ccy:cy})]]:[]}),['筆數',cash.length+' 筆']]}/>}
         {tab==='other'   &&<ListTab items={other} setItems={setOther} onEdit={o=>setModal({t:'editO',d:o})} title="其他資產" sub="不動產 · 黃金 · 退休金" emptyIcon="🏠" emptyText="尚未新增其他資產" renderAmt={item=><span style={{color:C.purple,fontWeight:800}}>{fa(item)}</span>} renderSub={item=>item.note?item.ccy+' · '+item.note:item.ccy} strip={[['TWD 合計','NT$'+fmt(other.filter(o=>o.ccy==='TWD').reduce((s,o)=>s+o.amount,0))],['項目數',other.length+' 項']]}/>}
         {tab==='liab'    &&<ListTab items={liab} setItems={setLiab} onEdit={l=>setModal({t:'editL',d:l})} title="負債" sub="貸款 · 信用卡 · 質押" emptyIcon="💳" emptyText="尚無負債記錄" renderAmt={item=><span style={{color:C.red,fontWeight:800}}>{fa(item)}</span>} renderSub={item=>item.rate?item.ccy+' · 年利率 '+item.rate+'%':item.ccy} strip={[['負債總計 TWD','NT$'+fmt(liab.filter(l=>l.ccy==='TWD').reduce((s,l)=>s+l.amount,0)),C.red],...(liab.filter(l=>l.rate).length>0?[['加權利率',(liab.filter(l=>l.rate).reduce((s,l)=>s+l.rate*l.amount,0)/liab.filter(l=>l.rate).reduce((s,l)=>s+l.amount,1)).toFixed(2)+'%']]:[]),['筆數',liab.length+' 筆']]}/>}
-        {tab==='records' &&<RecordsTab records={records} setRecords={setRecords} onSave={saveRec} onPush={pushGist} onPull={pullGist} syncing={syncing} syncStatus={syncSt} ghToken={ghToken} gistId={gistId} stocks={stocks} futures={futures} autoSave={autoSave} lastASMsg={lastASMsg}/>}
+        {tab==='records' &&<RecordsTab records={records} setRecords={setRecords} onSave={saveRec} onPush={pushGist} onPull={pullGist} syncing={syncing} syncStatus={syncSt} ghToken={ghToken} gistId={gistId} stocks={stocks} futures={futures} autoSave={autoSave} lastASMsg={lastASMsg} onImportRaw={importRaw}/>}
       </div>
       <div style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:600,background:'rgba(255,255,255,0.97)',backdropFilter:'blur(24px)',borderTop:`1px solid ${C.border}`,display:'flex',alignItems:'center',paddingBottom:'env(safe-area-inset-bottom,8px)',paddingTop:6,zIndex:10}}>
         {TABS.map(({k,l,icon})=>(
