@@ -45,7 +45,8 @@ const GFILE = 'portfolio-data.json';
 const CCY_OPTS = [['TWD','🇹🇼 TWD'],['USD','🇺🇸 USD'],['HKD','🇭🇰 HKD'],['EUR','🇪🇺 EUR'],['JPY','🇯🇵 JPY']];
 const RANGES = [
   {k:'1M',label:'1M',days:30},{k:'3M',label:'3M',days:90},
-  {k:'6M',label:'6M',days:180},{k:'1Y',label:'1Y',days:365},{k:'ALL',label:'全部',days:null},
+  {k:'6M',label:'6M',days:180},{k:'1Y',label:'1Y',days:365},
+  {k:'YTD',label:'YTD',days:null,ytd:true},{k:'ALL',label:'全部',days:null},
 ];
 const PAGE_SIZE = 15;
 
@@ -1012,7 +1013,11 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
   const hasPx=stocks.some(s=>s.px!=null)||futures.some(f=>f.px!=null);
   const allEntries=Object.entries(records).sort(([a],[b])=>b.localeCompare(a));
   const selRange=RANGES.find(r=>r.k===range);
-  const cutoff=selRange.days?new Date(Date.now()-selRange.days*86400000).toISOString().slice(0,10):null;
+  const cutoff = selRange.ytd
+    ? new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0,10)
+    : selRange.days
+      ? new Date(Date.now()-selRange.days*86400000).toISOString().slice(0,10)
+      : null;
   const filtered=allEntries.filter(([d])=>!cutoff||d>=cutoff);
   const chartEntries=[...filtered].reverse();
   const statsFirst=filtered[filtered.length-1], statsLast=filtered[0];
