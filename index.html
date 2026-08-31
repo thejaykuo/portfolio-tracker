@@ -842,19 +842,24 @@ function ListTab({items,setItems,onEdit,title,sub,emptyIcon,emptyText,renderAmt,
   );
 }
 // ── Chart ─────────────────────────────────────
-// month boundaries when the shown span is <=1yr, else year boundaries — no labels, just quiet reference lines
+// month boundaries when the shown span is <=1yr, else year boundaries
 function getGridLines(tMin, tMax){
   const spanDays = (tMax - tMin) / 86400000;
   const start = new Date(tMin);
+  const mode = spanDays <= 370 ? 'month' : 'year';
   const lines = [];
-  if(spanDays <= 370){
+  if(mode==='month'){
     let d = new Date(start.getFullYear(), start.getMonth()+1, 1);
     while(d.getTime() < tMax){ lines.push(d.getTime()); d = new Date(d.getFullYear(), d.getMonth()+1, 1); }
   } else {
     let d = new Date(start.getFullYear()+1, 0, 1);
     while(d.getTime() < tMax){ lines.push(d.getTime()); d = new Date(d.getFullYear()+1, 0, 1); }
   }
-  return lines;
+  return {mode, lines};
+}
+function fmtGridLabel(t, mode){
+  const d = new Date(t);
+  return mode==='month' ? (d.getMonth()+1)+"月'"+String(d.getFullYear()).slice(2) : String(d.getFullYear());
 }
 function NWChart({entries}){
   const [hov, setHov] = useState(null);
@@ -868,14 +873,11 @@ function NWChart({entries}){
   const tMin=Math.min(...times), tMax=Math.max(...times), tRange=tMax-tMin||1;
   const toX=t=>PL+((t-tMin)/tRange)*cW;
   const toY=v=>PT+cH-((v-mn)/rng)*cH;
-  const gridLines=getGridLines(tMin,tMax);
+  const {mode:gridMode, lines:gridLines}=getGridLines(tMin,tMax);
   const pts=entries.map(([d,v])=>({x:toX(new Date(d).getTime()),y:toY(v.nw)}));
   const poly=pts.map(p=>p.x+','+p.y).join(' ');
   const area=PL+','+(PT+cH)+' '+poly+' '+pts[pts.length-1].x+','+(PT+cH);
   const col=vals[vals.length-1]>=vals[0]?C.yellow:C.red;
-  // 5 evenly-spaced time labels across real date range
-  const labelTs=Array.from({length:5},(_,i)=>tMin+i/4*tRange);
-  const fmtLbl=ts=>{const d=new Date(ts);return(d.getMonth()+1)+'/\''+String(d.getFullYear()).slice(2);};
   const handleMove=e=>{
     const svg=e.currentTarget;
     const rect=svg.getBoundingClientRect();
@@ -905,9 +907,11 @@ function NWChart({entries}){
       <polyline points={poly} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
       <circle cx={pts[0].x} cy={pts[0].y} r="4" fill={col}/>
       <circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r="5" fill={col}/>
-      {labelTs.map((ts,i)=>(
-        <text key={i} x={toX(ts)} y={H-6} textAnchor="middle" style={{fontSize:9,fill:C.muted}}>{fmtLbl(ts)}</text>
-      ))}
+      {gridLines.map((t,i)=>{
+        const x=toX(t);
+        if(x<=PL||x>=PL+cW) return null;
+        return <text key={i} x={x} y={H-6} textAnchor="middle" style={{fontSize:9,fill:C.muted}}>{fmtGridLabel(t,gridMode)}</text>;
+      })}
       <text x={PL} y={PT+cH-2} textAnchor="start" style={{fontSize:9,fill:C.faint}}>{(mn/1e6).toFixed(1)}M</text>
       <text x={PL} y={PT+10}   textAnchor="start" style={{fontSize:9,fill:C.faint}}>{(mx/1e6).toFixed(1)}M</text>
       {hp&&he&&(
