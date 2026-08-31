@@ -888,25 +888,7 @@ function NWChart({entries}){
   const toX=t=>PL+((t-tMin)/tRange)*cW;
   const toY=v=>PT+cH-((v-mn)/rng)*cH;
   const pts=entries.map(([d,v])=>({x:toX(new Date(d).getTime()),y:toY(v.nw)}));
-  // period bands: monthly if range ≤ 1 year, yearly otherwise
-  const spanDays = (tMax - tMin) / 86400000;
-  const useMonths = spanDays <= 366;
-  const bands = [];
-  const startD = new Date(tMin);
-  // align band start to beginning of month or year
-  let cur = useMonths
-    ? new Date(startD.getFullYear(), startD.getMonth(), 1)
-    : new Date(startD.getFullYear(), 0, 1);
-  let idx = 0;
-  while(cur.getTime() < tMax){
-    const next = useMonths
-      ? new Date(cur.getFullYear(), cur.getMonth()+1, 1)
-      : new Date(cur.getFullYear()+1, 0, 1);
-    const x1 = Math.max(PL, toX(cur.getTime()));
-    const x2 = Math.min(PL+cW, toX(next.getTime()));
-    if(x2 > x1) bands.push({x1, x2, odd: idx%2===1});
-    cur = next; idx++;
-  }
+  const poly=pts.map(p=>p.x+','+p.y).join(' ');
   const area=PL+','+(PT+cH)+' '+poly+' '+pts[pts.length-1].x+','+(PT+cH);
   const col=vals[vals.length-1]>=vals[0]?C.yellow:C.red;
   // 5 evenly-spaced time labels across real date range
@@ -932,10 +914,6 @@ function NWChart({entries}){
           <stop offset="100%" stopColor={col} stopOpacity="0"/>
         </linearGradient>
       </defs>
-      {/* period bands */}
-      {bands.map((b,i)=>b.odd&&(
-        <rect key={i} x={b.x1} y={PT} width={b.x2-b.x1} height={cH} fill="rgba(0,0,0,0.035)" rx="0"/>
-      ))}
       <polygon points={area} fill="url(#gr)"/>
       <polyline points={poly} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
       <circle cx={pts[0].x} cy={pts[0].y} r="4" fill={col}/>
