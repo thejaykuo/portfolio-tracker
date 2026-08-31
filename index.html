@@ -859,7 +859,7 @@ function getGridLines(tMin, tMax){
 }
 function fmtGridLabel(t, mode){
   const d = new Date(t);
-  return mode==='month' ? (d.getMonth()+1)+"月'"+String(d.getFullYear()).slice(2) : String(d.getFullYear());
+  return mode==='month' ? (d.getMonth()+1)+"'"+String(d.getFullYear()).slice(2) : String(d.getFullYear());
 }
 function NWChart({entries}){
   const [hov, setHov] = useState(null);
