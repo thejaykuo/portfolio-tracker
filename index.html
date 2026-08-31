@@ -21,7 +21,6 @@ input:focus,select:focus{outline:2px solid #F5B731;outline-offset:-1px}
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
-
 const C = {
   bg:'#f5f5f5', card:'#fff', card2:'#f7f7f7', border:'#efefef',
   txt:'#1c1c1e', muted:'#8e8e93', faint:'#b0b0b5',
@@ -31,9 +30,7 @@ const C = {
   greenBg:'#e9faf0', redBg:'#fff0ee',
   shadow:'0 2px 12px rgba(0,0,0,0.07)', shadowSm:'0 1px 4px rgba(0,0,0,0.05)',
 };
-
 const PIE_COLORS = ['#F5B731','#007AFF','#34c759','#af52de','#ff9500','#ff3b30','#00c7be','#5856d6','#ff6b9d','#30b0c7','#ffcc02','#ff6d00'];
-
 const FUT_SPOT = { TX:'IX0001', MTX:'IX0001', TE:'IX0002', TF:'IX0004' };
 const SK = {
   s:'ptf:s', f:'ptf:f', c:'ptf:c', l:'ptf:l', o:'ptf:o',
@@ -49,17 +46,14 @@ const RANGES = [
   {k:'YTD',label:'YTD',days:null,ytd:true},{k:'ALL',label:'全部',days:null},
 ];
 const PAGE_SIZE = 15;
-
 const ls = {
   get: k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}},
   set: (k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}},
 };
-
 function fmt(n,d=0){
   if(n==null||isNaN(n))return'—';
   return n.toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d});
 }
-
 function relTime(input){
   if(!input) return '';
   const isDateOnly = typeof input==='string' && /^\d{4}-\d{2}-\d{2}$/.test(input);
@@ -81,12 +75,10 @@ function relTime(input){
   if(diff<=6)  return diff+'日前 '+timeStr;
   return diff+'天前 '+timeStr;
 }
-
 function Pnl({v,d=0}){
   if(v==null||isNaN(v))return <span style={{color:C.muted}}>—</span>;
   return <span style={{color:v>=0?C.green:C.red,fontWeight:700}}>{v>=0?'+':''}{fmt(v,d)}</span>;
 }
-
 function calcNW(stocks,futures,cash,liabilities,otherAssets,rates){
   const toT=(a,c)=>c==='TWD'?a:a*(rates[c]||1);
   const sv=stocks.reduce((s,x)=>s+toT((x.px??x.cost)*x.qty,x.market==='US'?'USD':'TWD'),0);
@@ -98,7 +90,6 @@ function calcNW(stocks,futures,cash,liabilities,otherAssets,rates){
   const tl=liabilities.reduce((s,l)=>s+toT(l.amount,l.ccy),0);
   return {ta,tl,nw:ta-tl};
 }
-
 // ── Risk map ──────────────────────────────────
 // Each entry: { symbol, name, risk (net, signed), hasStock, futureRisk (net, signed) }
 function buildRiskMap(stocks, futures, rates){
@@ -127,7 +118,6 @@ function buildRiskMap(stocks, futures, rates){
     .filter(x => Math.round(Math.abs(x.risk)) > 0)
     .sort((a,b) => Math.abs(b.risk)-Math.abs(a.risk));
 }
-
 function getTag(item){
   const hasFut = Math.round(Math.abs(item.futureRisk)) > 0;
   if(item.hasStock && hasFut)
@@ -136,7 +126,6 @@ function getTag(item){
   if(item.futureRisk < 0) return {label:'期貨(空)',color:C.red};
   return {label:'期貨(多)',color:C.orange};
 }
-
 // ── Primitives ────────────────────────────────
 function PageHeader({title,sub}){
   return(
@@ -248,7 +237,6 @@ function Toggle({on,onChange,label,sub}){
     </div>
   );
 }
-
 // ── Modals ────────────────────────────────────
 function StockModal({initial,onClose,onSave}){
   const [mkt,setMkt]=useState(initial?.market||'TW');
@@ -288,9 +276,7 @@ function StockModal({initial,onClose,onSave}){
     </Modal>
   );
 }
-
 const FP_LIST=[{symbol:'TX',name:'台指期（大台）',mult:200},{symbol:'MTX',name:'小台指',mult:50},{symbol:'TE',name:'電子期',mult:4000},{symbol:'TF',name:'金融期',mult:1000}];
-
 function FutureModal({initial,onClose,onSave}){
   const [sym,setSym]=useState(initial?.symbol||'TX');
   const [name,setName]=useState(initial?.name||'台指期（大台）');
@@ -339,7 +325,6 @@ function FutureModal({initial,onClose,onSave}){
     </Modal>
   );
 }
-
 function CashModal({initial,onClose,onSave}){
   const [label,setLabel]=useState(initial?.label||'');
   const [amount,setAmount]=useState(String(initial?.amount||''));
@@ -359,7 +344,6 @@ function CashModal({initial,onClose,onSave}){
     </Modal>
   );
 }
-
 function LiabModal({initial,onClose,onSave}){
   const [label,setLabel]=useState(initial?.label||'');
   const [amount,setAmount]=useState(String(initial?.amount||''));
@@ -380,7 +364,6 @@ function LiabModal({initial,onClose,onSave}){
     </Modal>
   );
 }
-
 function OtherModal({initial,onClose,onSave}){
   const [label,setLabel]=useState(initial?.label||'');
   const [amount,setAmount]=useState(String(initial?.amount||''));
@@ -401,7 +384,6 @@ function OtherModal({initial,onClose,onSave}){
     </Modal>
   );
 }
-
 // ── Settings Modal ────────────────────────────
 function SettingsModal({fugleKey,setFugleKey,gasUrl,setGasUrl,ghToken,setGhToken,gistId,setGistId,autoSave,setAutoSave,onClose}){
   const [fk,setFk]=useState(fugleKey||'');
@@ -456,11 +438,9 @@ function SettingsModal({fugleKey,setFugleKey,gasUrl,setGasUrl,ghToken,setGhToken
     </Modal>
   );
 }
-
 // ── Net Worth Card ────────────────────────────
 function EyeOpen(){return <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;}
 function EyeClosed(){return <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;}
-
 function NetWorthCard({stocks,futures,cash,liabilities,otherAssets,rates,hidden,toggleHidden}){
   const {ta,tl,nw}=calcNW(stocks,futures,cash,liabilities,otherAssets,rates);
   const dot='••••••';
@@ -494,7 +474,6 @@ function NetWorthCard({stocks,futures,cash,liabilities,otherAssets,rates,hidden,
     </div>
   );
 }
-
 // ── Strip ─────────────────────────────────────
 function Strip({items}){
   return(
@@ -508,7 +487,6 @@ function Strip({items}){
     </div>
   );
 }
-
 // ── Risk Exposure ─────────────────────────────
 function PieChart({items, totalAbs, totalNet}){
   const [hovered, setHovered] = useState(null);
@@ -564,7 +542,6 @@ function PieChart({items, totalAbs, totalNet}){
     </svg>
   );
 }
-
 function RiskExposure({stocks, futures, rates, nw}){
   const items = buildRiskMap(stocks, futures, rates);
   if(!items.length) return null;
@@ -591,7 +568,6 @@ function RiskExposure({stocks, futures, rates, nw}){
         </div>
       </div>
       <div style={{fontSize:11,color:C.muted,marginBottom:14}}>名目風險敞口 · 股票市值 + 期貨名目（含方向）</div>
-
       {/* pie chart */}
       <div style={{marginBottom:16}}>
         <div style={{maxWidth:220,margin:'0 auto'}}>
@@ -610,9 +586,7 @@ function RiskExposure({stocks, futures, rates, nw}){
           ))}
         </div>
       </div>
-
       <Div/>
-
       {/* ranked list */}
       <div style={{marginTop:12}}>
         {items.map((item,i)=>{
@@ -644,7 +618,6 @@ function RiskExposure({stocks, futures, rates, nw}){
           );
         })}
       </div>
-
       <div style={{marginTop:8,paddingTop:10,borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <span style={{fontSize:12,color:C.muted,fontWeight:600}}>淨風險曝險</span>
         <span style={{fontSize:14,fontWeight:800,color:totalNet<0?C.red:'inherit'}}>
@@ -654,7 +627,6 @@ function RiskExposure({stocks, futures, rates, nw}){
     </Card>
   );
 }
-
 // ── Overview ──────────────────────────────────
 function Tile({icon,label,value,sub,color=C.yellow,onClick}){
   return(
@@ -671,7 +643,6 @@ function Tile({icon,label,value,sub,color=C.yellow,onClick}){
     </div>
   );
 }
-
 function Overview({stocks,twS,usS,futs,cash,liabilities,otherAssets,rates,setTab,hidden,toggleHidden}){
   const twVal=twS.reduce((s,x)=>s+(x.px??x.cost)*x.qty,0);
   const twPnl=twS.filter(x=>x.px!=null).reduce((s,x)=>s+(x.px-x.cost)*x.qty,0);
@@ -712,7 +683,6 @@ function Overview({stocks,twS,usS,futs,cash,liabilities,otherAssets,rates,setTab
     </div>
   );
 }
-
 // ── Stocks Tab ────────────────────────────────
 function StocksTab({stocks,setStocks,onEdit}){
   const del=id=>setStocks(p=>p.filter(s=>s.id!==id));
@@ -770,7 +740,6 @@ function StocksTab({stocks,setStocks,onEdit}){
     </div>
   );
 }
-
 // ── Futures Tab ───────────────────────────────
 function FuturesTab({futures,setFutures,onEdit}){
   const del=id=>setFutures(p=>p.filter(f=>f.id!==id));
@@ -840,7 +809,6 @@ function FuturesTab({futures,setFutures,onEdit}){
     </div>
   );
 }
-
 // ── Generic List Tab ──────────────────────────
 function ListTab({items,setItems,onEdit,title,sub,emptyIcon,emptyText,renderAmt,renderSub,strip}){
   const del=id=>setItems(p=>p.filter(x=>x.id!==id));
@@ -873,8 +841,21 @@ function ListTab({items,setItems,onEdit,title,sub,emptyIcon,emptyText,renderAmt,
     </div>
   );
 }
-
 // ── Chart ─────────────────────────────────────
+// month boundaries when the shown span is <=1yr, else year boundaries — no labels, just quiet reference lines
+function getGridLines(tMin, tMax){
+  const spanDays = (tMax - tMin) / 86400000;
+  const start = new Date(tMin);
+  const lines = [];
+  if(spanDays <= 370){
+    let d = new Date(start.getFullYear(), start.getMonth()+1, 1);
+    while(d.getTime() < tMax){ lines.push(d.getTime()); d = new Date(d.getFullYear(), d.getMonth()+1, 1); }
+  } else {
+    let d = new Date(start.getFullYear()+1, 0, 1);
+    while(d.getTime() < tMax){ lines.push(d.getTime()); d = new Date(d.getFullYear()+1, 0, 1); }
+  }
+  return lines;
+}
 function NWChart({entries}){
   const [hov, setHov] = useState(null);
   if(entries.length<2) return <div style={{textAlign:'center',color:C.muted,padding:'16px 0',fontSize:13}}>需至少 2 筆記錄才能顯示走勢</div>;
@@ -887,6 +868,7 @@ function NWChart({entries}){
   const tMin=Math.min(...times), tMax=Math.max(...times), tRange=tMax-tMin||1;
   const toX=t=>PL+((t-tMin)/tRange)*cW;
   const toY=v=>PT+cH-((v-mn)/rng)*cH;
+  const gridLines=getGridLines(tMin,tMax);
   const pts=entries.map(([d,v])=>({x:toX(new Date(d).getTime()),y:toY(v.nw)}));
   const poly=pts.map(p=>p.x+','+p.y).join(' ');
   const area=PL+','+(PT+cH)+' '+poly+' '+pts[pts.length-1].x+','+(PT+cH);
@@ -914,6 +896,11 @@ function NWChart({entries}){
           <stop offset="100%" stopColor={col} stopOpacity="0"/>
         </linearGradient>
       </defs>
+      {gridLines.map((t,i)=>{
+        const x=toX(t);
+        if(x<=PL||x>=PL+cW) return null;
+        return <line key={i} x1={x} y1={PT} x2={x} y2={PT+cH} stroke={C.faint} strokeWidth="1" opacity="0.3"/>;
+      })}
       <polygon points={area} fill="url(#gr)"/>
       <polyline points={poly} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
       <circle cx={pts[0].x} cy={pts[0].y} r="4" fill={col}/>
@@ -935,13 +922,11 @@ function NWChart({entries}){
     </svg>
   );
 }
-
 // ── Import Modal ──────────────────────────────
 function ImportModal({onClose, onImport}){
   const [raw, setRaw] = useState('');
   const [preview, setPreview] = useState([]);
   const [err, setErr] = useState('');
-
   const parse = text => {
     const lines = text.trim().split('\n').filter(l=>l.trim());
     const result = [], errors = [];
@@ -960,20 +945,17 @@ function ImportModal({onClose, onImport}){
     });
     return {result, errors};
   };
-
   useEffect(()=>{
     if(!raw.trim()){ setPreview([]); setErr(''); return; }
     const {result, errors} = parse(raw);
     setPreview(result);
     setErr(errors.length ? errors.slice(0,3).join('\n')+(errors.length>3?' …等':'') : '');
   }, [raw]);
-
   const doImport = () => {
     if(!preview.length) return;
     onImport(preview);
     onClose();
   };
-
   return(
     <Modal title="批次匯入歷史記錄" onClose={onClose}>
       <div style={{fontSize:12,color:C.muted,marginBottom:10,lineHeight:1.6}}>
@@ -1002,7 +984,6 @@ function ImportModal({onClose, onImport}){
     </Modal>
   );
 }
-
 // ── Records Tab ───────────────────────────────
 function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,ghToken,gistId,stocks,futures,autoSave,lastASMsg,onImportRaw}){
   const [range,setRange]=useState('1Y');
@@ -1175,7 +1156,6 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
     </div>
   );
 }
-
 // ── Tab Icons ─────────────────────────────────
 const TABS=[
   {k:'overview',l:'總覽',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>},
@@ -1186,7 +1166,6 @@ const TABS=[
   {k:'liab',   l:'負債',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>},
   {k:'records',l:'記錄',icon:a=><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={a?C.yellow:C.faint} strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>},
 ];
-
 // ── Main App ──────────────────────────────────
 function App(){
   const [tab,setTab]           = useState('overview');
@@ -1212,7 +1191,6 @@ function App(){
   const [hidden,setHidden]     = useState(true);
   const [pendingAS,setPAS]     = useState(false);
   const [lastASMsg,setLAM]     = useState('');
-
   useEffect(()=>ls.set(SK.s,stocks),[stocks]);
   useEffect(()=>ls.set(SK.f,futures),[futures]);
   useEffect(()=>ls.set(SK.c,cash),[cash]);
@@ -1220,10 +1198,8 @@ function App(){
   useEffect(()=>ls.set(SK.o,other),[other]);
   useEffect(()=>ls.set(SK.r,records),[records]);
   useEffect(()=>ls.set(SK.rates,rates),[rates]);
-
   const stateRef=useRef({});
   useEffect(()=>{stateRef.current={stocks,futures,cash,liab,other,rates,fugleKey,gasUrl,ghToken,gistId,records};});
-
   useEffect(()=>{
     if(!pendingAS||refreshing) return;
     setPAS(false);
@@ -1237,7 +1213,6 @@ function App(){
       pushGistRaw(body,ghToken,gistId).then(id=>{if(id&&id!==gistId){setGistId(id);ls.set(SK.gist,id);}}).catch(()=>{});
     }
   },[pendingAS,refreshing]);
-
   const asDoneRef=useRef({date:null});
   useEffect(()=>{
     if(!autoSave.enabled) return;
@@ -1256,7 +1231,6 @@ function App(){
     const id=setInterval(check,30000);
     return()=>clearInterval(id);
   },[autoSave.enabled,autoSave.time]);
-
   function buildPayload(recs,s,f,c,l,o){
     return JSON.stringify({stocks:s.map(x=>({...x,px:undefined})),futures:f.map(x=>({...x,px:undefined})),cash:c,liabilities:l,otherAssets:o,records:recs},null,2);
   }
@@ -1379,7 +1353,6 @@ function App(){
     }catch(e){setSyncSt({ok:false,msg:e.message});}
     setSyncing(false);
   }
-
   const noData=stocks.length===0&&futures.length===0;
   const twS=stocks.filter(s=>s.market==='TW'), usS=stocks.filter(s=>s.market==='US');
   const fa=item=>{
@@ -1388,7 +1361,6 @@ function App(){
     return sym+fmt(item.amount,d);
   };
   const FAB={stocks:()=>setModal('addS'),futures:()=>setModal('addF'),cash:()=>setModal('addC'),other:()=>setModal('addO'),liab:()=>setModal('addL')};
-
   return(
     <div style={{background:C.bg,minHeight:'100vh',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif',color:C.txt,maxWidth:600,margin:'0 auto'}}>
       <div style={{background:'rgba(255,255,255,0.94)',backdropFilter:'blur(20px)',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:`1px solid ${C.border}`,position:'sticky',top:0,zIndex:10}}>
@@ -1448,7 +1420,6 @@ function App(){
     </div>
   );
 }
-
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
