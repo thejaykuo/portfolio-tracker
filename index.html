@@ -44,6 +44,7 @@ const RANGES = [
   {k:'1M',label:'1M',days:30},{k:'3M',label:'3M',days:90},
   {k:'6M',label:'6M',days:180},{k:'1Y',label:'1Y',days:365},
   {k:'YTD',label:'YTD',days:null,ytd:true},{k:'ALL',label:'全部',days:null},
+  {k:'CUSTOM',label:'自訂',days:null,custom:true},
 ];
 const PAGE_SIZE = 15;
 const ls = {
@@ -994,18 +995,26 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
   const [page,setPage]=useState(0);
   const [showImport,setShowImport]=useState(false);
   const [confirmDel,setConfirmDel]=useState(null); // date string to confirm
+  const [custStart,setCustStart]=useState('');
+  const [custEnd,setCustEnd]=useState('');
   const today=new Date().toISOString().slice(0,10);
   const hasPx=stocks.some(s=>s.px!=null)||futures.some(f=>f.px!=null);
   const allEntries=Object.entries(records).sort(([a],[b])=>b.localeCompare(a));
   const selRange=RANGES.find(r=>r.k===range);
-  const cutoff = selRange.ytd
-    ? new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0,10)
-    : selRange.days
-      ? new Date(Date.now()-selRange.days*86400000).toISOString().slice(0,10)
-      : null;
-  const filtered=allEntries.filter(([d])=>!cutoff||d>=cutoff);
+  const cutoff = selRange.custom
+    ? (custStart||null)
+    : selRange.ytd
+      ? new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0,10)
+      : selRange.days
+        ? new Date(Date.now()-selRange.days*86400000).toISOString().slice(0,10)
+        : null;
+  const upper = selRange.custom ? (custEnd||null) : null;
+  const filtered=allEntries.filter(([d])=>(!cutoff||d>=cutoff)&&(!upper||d<=upper));
   const chartEntries=[...filtered].reverse();
   const statsFirst=filtered[filtered.length-1], statsLast=filtered[0];
+  const daysLabel=selRange.days
+    ? selRange.days+'d'
+    : (statsFirst&&statsLast ? Math.round((new Date(statsLast[0])-new Date(statsFirst[0]))/86400000)+'d' : '全部');
   const periodChg=(statsFirst&&statsLast)?statsLast[1].nw-statsFirst[1].nw:null;
   const periodPct=(statsFirst&&statsFirst[1].nw)?periodChg/Math.abs(statsFirst[1].nw)*100:null;
   const allNW=filtered.map(([,v])=>v.nw);
@@ -1034,7 +1043,7 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
               <div style={{fontSize:14,fontWeight:700}}>淨值走勢</div><Pill label={allEntries.length+' 筆'}/>
             </div>
-            <div style={{display:'flex',gap:6,marginBottom:14}}>
+            <div style={{display:'flex',gap:6,marginBottom:selRange.custom?10:14}}>
               {RANGES.map(r=>(
                 <button key={r.k} onClick={()=>{setRange(r.k);setPage(0);}}
                   style={{flex:1,padding:'6px 4px',borderRadius:10,border:`1.5px solid ${range===r.k?C.yellow:C.border}`,
@@ -1044,6 +1053,15 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
                 </button>
               ))}
             </div>
+            {selRange.custom&&(
+              <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:14}}>
+                <input type="date" value={custStart} max={custEnd||today} onChange={e=>{setCustStart(e.target.value);setPage(0);}}
+                  style={{flex:1,minWidth:0,background:C.card2,border:`1.5px solid ${C.border}`,borderRadius:10,padding:'8px 10px',fontSize:13,color:C.txt}}/>
+                <span style={{color:C.faint,fontSize:12,flexShrink:0}}>至</span>
+                <input type="date" value={custEnd} min={custStart} max={today} onChange={e=>{setCustEnd(e.target.value);setPage(0);}}
+                  style={{flex:1,minWidth:0,background:C.card2,border:`1.5px solid ${C.border}`,borderRadius:10,padding:'8px 10px',fontSize:13,color:C.txt}}/>
+              </div>
+            )}
             <NWChart entries={chartEntries}/>
             {filtered.length>=2&&(
               <div style={{marginTop:12,display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
@@ -1055,7 +1073,7 @@ function RecordsTab({records,setRecords,onSave,onPush,onPull,syncing,syncStatus,
                   ['區間高','NT$'+fmt(periodHigh)],
                   ['區間低','NT$'+fmt(periodLow)],
                   ['筆數',filtered.length+' 筆'],
-                  ['天數',selRange.days?selRange.days+'d':'全部'],
+                  ['天數',daysLabel],
                 ].map(([l,v,col])=>(
                   <div key={l} style={{background:C.card2,borderRadius:10,padding:'8px 10px'}}>
                     <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:600}}>{l}</div>
